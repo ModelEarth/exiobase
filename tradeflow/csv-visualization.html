@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Visualization - Exiobase Trade Flow</title>
+    <link type="text/css" rel="stylesheet" href="../../localsite/css/base.css" />
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        .csv-container {
+            margin: 20px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .csv-header {
+            background: #f5f5f5;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .csv-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .csv-table {
+            max-height: 400px;
+            overflow: auto;
+        }
+        .csv-table table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .csv-table th, .csv-table td {
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        .csv-table th {
+            background: #f9f9f9;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .chart-container {
+            margin: 20px 0;
+            min-height: 400px;
+        }
+        .file-selector {
+            margin: 20px 0;
+        }
+        .file-selector select {
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .btn {
+            padding: 8px 16px;
+            background: #007cba;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background: #005a87;
+        }
+        .error {
+            color: red;
+            background: #ffe6e6;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="content contentpadding">
+        <h1>CSV Data Visualization</h1>
+        
+        <div class="file-selector">
+            <label for="csvFile">Select CSV File:</label>
+            <select id="csvFile">
+                <option value="">Choose a file...</option>
+                <option value="trade.csv">Trade Flows (trade.csv)</option>
+                <option value="trade_impact.csv">Trade Impacts (trade_impact.csv)</option>
+                <option value="trade_resource.csv">Trade Resources (trade_resource.csv)</option>
+                <option value="trade_material.csv">Trade Materials (trade_material.csv)</option>
+                <option value="trade_employment.csv">Trade Employment (trade_employment.csv)</option>
+                <option value="industry.csv">Industries (industry.csv)</option>
+                <option value="factor.csv">Factors (factor.csv)</option>
+            </select>
+            <button class="btn" onclick="loadCSV()">Load Data</button>
+            <button class="btn" onclick="downloadCSV()">Download CSV</button>
+        </div>
+
+        <div id="errorMessage" class="error" style="display: none;"></div>
+
+        <div class="csv-container" id="csvContainer" style="display: none;">
+            <div class="csv-header">
+                <h3 id="csvTitle">CSV Data</h3>
+                <div class="csv-controls">
+                    <label>Chart Type:</label>
+                    <select id="chartType">
+                        <option value="bar">Bar Chart</option>
+                        <option value="line">Line Chart</option>
+                        <option value="scatter">Scatter Plot</option>
+                        <option value="pie">Pie Chart</option>
+                    </select>
+                    <button class="btn" onclick="createChart()">Create Chart</button>
+                </div>
+            </div>
+            <div class="csv-table" id="csvTable"></div>
+        </div>
+
+        <div class="chart-container" id="chartContainer" style="display: none;"></div>
+    </div>
+
+    <script>
+        let csvData = [];
+        let csvHeaders = [];
+
+        async function loadCSV() {
+            const filename = document.getElementById('csvFile').value;
+            if (!filename) {
+                showError('Please select a CSV file');
+                return;
+            }
+
+            try {
+                hideError();
+                
+                // Try different possible paths for the CSV file
+                const possiblePaths = [
+                    filename,
+                    `year/2019/CN/domestic/${filename}`,
+                    `year/2019/CN/imports/${filename}`,
+                    `year/2019/CN/exports/${filename}`,
+                    `year/2019/${filename}`
+                ];
+
+                let response = null;
+                let foundPath = null;
+
+                for (const path of possiblePaths) {
+                    try {
+                        response = await fetch(path);
+                        if (response.ok) {
+                            foundPath = path;
+                            break;
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+
+                if (!response || !response.ok) {
+                    throw new Error(`CSV file not found. Tried paths: ${possiblePaths.join(', ')}`);
+                }
+
+                const csvText = await response.text();
+                parseCSV(csvText, filename);
+                
+            } catch (error) {
+                showError(`Error loading CSV: ${error.message}`);
+            }
+        }
+
+        function parseCSV(csvText, filename) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) {
+                showError('CSV file appears to be empty or invalid');
+                return;
+            }
+
+            csvHeaders = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+            csvData = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                const values = parseCSVLine(lines[i]);
+                if (values.length === csvHeaders.length) {
+                    const row = {};
+                    csvHeaders.forEach((header, index) => {
+                        row[header] = values[index];
+                    });
+                    csvData.push(row);
+                }
+            }
+
+            displayTable(filename);
+            document.getElementById('csvContainer').style.display = 'block';
+        }
+
+        function parseCSVLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current.trim());
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            
+            result.push(current.trim());
+            return result;
+        }
+
+        function displayTable(filename) {
+            const title = document.getElementById('csvTitle');
+            title.textContent = `${filename} (${csvData.length} rows)`;
+
+            const table = document.createElement('table');
+            
+            // Headers
+            const headerRow = document.createElement('tr');
+            csvHeaders.forEach(header => {
+                const th = document.createElement('th');
+                th.textContent = header;
+                headerRow.appendChild(th);
+            });
+            table.appendChild(headerRow);
+
+            // Data rows (limit to first 100 for performance)
+            const displayLimit = Math.min(csvData.length, 100);
+            for (let i = 0; i < displayLimit; i++) {
+                const row = document.createElement('tr');
+                csvHeaders.forEach(header => {
+                    const td = document.createElement('td');
+                    td.textContent = csvData[i][header] || '';
+                    row.appendChild(td);
+                });
+                table.appendChild(row);
+            }
+
+            if (csvData.length > displayLimit) {
+                const row = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = csvHeaders.length;
+                td.textContent = `... and ${csvData.length - displayLimit} more rows`;
+                td.style.textAlign = 'center';
+                td.style.fontStyle = 'italic';
+                row.appendChild(td);
+                table.appendChild(row);
+            }
+
+            const tableContainer = document.getElementById('csvTable');
+            tableContainer.innerHTML = '';
+            tableContainer.appendChild(table);
+        }
+
+        function createChart() {
+            if (csvData.length === 0) {
+                showError('No data loaded');
+                return;
+            }
+
+            const chartType = document.getElementById('chartType').value;
+            
+            // Find numeric columns for charting
+            const numericColumns = csvHeaders.filter(header => {
+                const firstValue = csvData[0][header];
+                return !isNaN(parseFloat(firstValue)) && isFinite(firstValue);
+            });
+
+            if (numericColumns.length === 0) {
+                showError('No numeric columns found for charting');
+                return;
+            }
+
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.style.display = 'block';
+
+            let traces = [];
+            
+            if (chartType === 'pie') {
+                // For pie chart, use first categorical and first numeric column
+                const categoryColumn = csvHeaders.find(h => !numericColumns.includes(h)) || csvHeaders[0];
+                const valueColumn = numericColumns[0];
+                
+                const pieData = {};
+                csvData.forEach(row => {
+                    const category = row[categoryColumn];
+                    const value = parseFloat(row[valueColumn]) || 0;
+                    pieData[category] = (pieData[category] || 0) + value;
+                });
+
+                traces.push({
+                    type: 'pie',
+                    labels: Object.keys(pieData),
+                    values: Object.values(pieData),
+                    name: valueColumn
+                });
+            } else {
+                // For other chart types, use first 3 numeric columns
+                const columnsToChart = numericColumns.slice(0, 3);
+                
+                columnsToChart.forEach(column => {
+                    const y = csvData.map(row => parseFloat(row[column]) || 0);
+                    const x = csvData.map((row, index) => index + 1);
+                    
+                    traces.push({
+                        type: chartType === 'line' ? 'scatter' : chartType,
+                        mode: chartType === 'line' ? 'lines+markers' : chartType === 'scatter' ? 'markers' : undefined,
+                        x: x,
+                        y: y,
+                        name: column
+                    });
+                });
+            }
+
+            const layout = {
+                title: `${document.getElementById('csvFile').value} - ${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Chart`,
+                xaxis: { title: 'Index' },
+                yaxis: { title: 'Value' },
+                showlegend: true
+            };
+
+            Plotly.newPlot('chartContainer', traces, layout);
+        }
+
+        function downloadCSV() {
+            if (csvData.length === 0) {
+                showError('No data to download');
+                return;
+            }
+
+            const filename = document.getElementById('csvFile').value;
+            const csvContent = [
+                csvHeaders.join(','),
+                ...csvData.map(row => csvHeaders.map(header => row[header]).join(','))
+            ].join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename || 'data.csv';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
