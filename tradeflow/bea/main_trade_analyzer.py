@@ -20,6 +20,24 @@ class StateTradeAnalyzer:
         self.state_codes = self._load_state_codes()
         self.employment_multipliers = self._load_employment_multipliers()
         self.industry_state_mapping = self._load_industry_state_data()
+        self.industry_category_by_id = self._load_industry_categories()
+        self.default_producing_states = ['CA', 'TX', 'NY', 'IL', 'FL', 'OH', 'PA', 'MI']
+        self.default_consuming_states = [
+            'CA', 'TX', 'NY', 'FL', 'IL', 'PA', 'OH', 'MI', 'GA', 'NC',
+            'NJ', 'VA', 'WA', 'AZ', 'MA', 'IN', 'TN', 'MO', 'MD', 'WI'
+        ]
+        self.producing_states_by_industry = {
+            'agriculture': ['CA', 'TX', 'FL', 'IL', 'WA', 'NC', 'MI', 'OH'],
+            'manufacturing': ['CA', 'TX', 'IL', 'MI', 'OH', 'PA', 'NC', 'NY'],
+            'mining': ['TX', 'PA', 'OH', 'OK', 'LA', 'ND', 'WY', 'CA'],
+            'construction': ['CA', 'TX', 'FL', 'NY', 'IL', 'PA', 'GA', 'NC'],
+            'utilities': ['TX', 'CA', 'PA', 'IL', 'OH', 'NY', 'FL', 'GA'],
+            'transportation': ['CA', 'TX', 'IL', 'GA', 'NY', 'FL', 'OH', 'WA'],
+            'services': ['CA', 'TX', 'NY', 'FL', 'IL', 'PA', 'GA', 'NC'],
+        }
+        self._bea_allocation_source_id = None
+        self._bea_allocation_weight_lookup = {}
+        self._bea_allocation_ranked_states = {}
         
         # Economic impact coefficients
         self.direct_job_coefficient = 1.0
@@ -89,6 +107,106 @@ class StateTradeAnalyzer:
         }
         
         return state_specializations
+
+    def _load_industry_categories(self):
+        """Load Exiobase 5-character industry IDs from industry.csv."""
+        year = self.config.get('YEAR')
+        filename = self.config.get('FILES', {}).get('industries', 'industry.csv')
+        base_template = self.config.get('FOLDERS', {}).get('base', '')
+        tradeflow_dir = Path(__file__).parents[1]
+        repo_root = Path(__file__).parents[3]
+
+        candidates = []
+        if base_template:
+            base_path = Path(str(base_template).format(year=year))
+            candidates.extend([
+                Path.cwd() / base_path / filename,
+                tradeflow_dir / base_path / filename,
+            ])
+        candidates.append(repo_root / 'trade-data' / 'year' / str(year) / filename)
+
+        seen = set()
+        for path in candidates:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if not path.exists():
+                continue
+
+            try:
+                industry_df = pd.read_csv(path)
+            except Exception as exc:
+                print(f"    Could not load industry categories from {path}: {exc}")
+                continue
+
+            required = {'industry_id', 'name', 'category'}
+            if not required.issubset(industry_df.columns):
+                print(f"    industry.csv missing columns {required - set(industry_df.columns)} at {path}")
+                continue
+
+            category_by_id = {}
+            for _, row in industry_df.iterrows():
+                industry_id = str(row['industry_id']).strip().upper()
+                category_by_id[industry_id] = self._normalize_industry_category(
+                    row.get('category', ''),
+                    row.get('name', '')
+                )
+
+            print(f"    Loaded {len(category_by_id)} industry categories from {path}")
+            return category_by_id
+
+        print("    industry.csv not found - falling back to NAICS-prefix industry categorization")
+        return {}
+
+    def _normalize_industry_category(self, category, name=''):
+        """Map detailed Exiobase categories to the broad state-allocation buckets."""
+        category_text = str(category).lower()
+        name_text = str(name).lower()
+        text = f"{category_text} {name_text}"
+
+        if self._text_has_any(name_text, [
+            'sewerage', 'sewage', 'waste collection', 'waste treatment',
+            'water collection', 'water treatment'
+        ]):
+            return 'utilities'
+        if self._text_has_any(text, [
+            'agriculture', 'crop', 'rice', 'wheat', 'cereal', 'vegetable', 'fruit',
+            'nut', 'oil seed', 'sugar cane', 'sugar beet', 'cattle', 'pig',
+            'poultry', 'meat animal', 'raw milk', 'wool', 'manure', 'forestry',
+            'logging', 'fish', 'fishing'
+        ]):
+            return 'agriculture'
+        if self._text_has_any(text, [
+            'mining', 'coal', 'petroleum', 'crude', 'natural gas', 'ore',
+            'lignite', 'uranium', 'quarry'
+        ]):
+            return 'mining'
+        if 'construction' in text or 'building' in text:
+            return 'construction'
+        if self._text_has_any(text, [
+            'electricity', 'gas supply', 'water supply', 'steam', 'utility',
+            'utilities', 'sewerage', 'sewage', 'waste collection',
+            'waste treatment', 'water collection', 'water treatment'
+        ]):
+            return 'utilities'
+        if self._text_has_any(text, ['transportation services', 'transport by', 'land transport', 'water transport', 'air transport', 'pipeline']):
+            return 'transportation'
+        if self._text_has_any(text, [
+            'manufacturing', 'food', 'beverage', 'tobacco', 'textile', 'clothing',
+            'leather', 'chemical', 'pharmaceutical', 'plastic', 'rubber', 'metal',
+            'steel', 'iron', 'aluminum', 'machinery', 'equipment', 'motor vehicle',
+            'aircraft', 'ship', 'paper', 'cement', 'glass', 'wood products'
+        ]):
+            return 'manufacturing'
+        return 'services'
+
+    def _text_has_any(self, text, terms):
+        """Return true when any term appears as a word or phrase."""
+        return any(
+            re.search(rf'(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])', text)
+            for term in terms
+        )
     
     def load_exiobase_satellite(self, exiobase_zip_path):
         """
@@ -191,6 +309,11 @@ class StateTradeAnalyzer:
     def disaggregate_domestic_flows(self, base_trade_df, bea_state_data=None):
         print("    🗺️ Disaggregating domestic flows to state level...")
 
+        if self._prepare_bea_allocation_cache(bea_state_data):
+            print("      Using BEA Regional state allocation weights")
+        else:
+            print("      Using built-in proxy state allocation weights")
+
         CHUNK_SIZE = 100_000  # tune if needed
         chunks = []
         buffer = []
@@ -224,25 +347,24 @@ class StateTradeAnalyzer:
     def _disaggregate_single_flow(self, trade_row, bea_data=None):
         """Disaggregate a single trade flow to state level.
 
-        When self._satellite_data is populated, emits one row per (state-pair, factor_id)
-        using Exiobase S-matrix coefficients for the trade row's industry1 sector.
-        Otherwise emits one aggregate row per state-pair.
+        Emits one aggregate row per state-pair. Interstate factor rows are
+        streamed later from these rows and the Exiobase S-matrix coefficients.
         """
         flows = []
 
         # Broad industry category used for state allocation weights
-        industry = self._categorize_industry(trade_row.get('industry1', ''))
-        producing_states = self._get_producing_states(industry)
-        consuming_states = self._get_consuming_states(industry)
+        industry1_cat = self._categorize_industry(trade_row.get('industry1', ''))
+        industry2_cat = self._categorize_industry(trade_row.get('industry2', ''))
+        producing_states = self._get_producing_states(industry1_cat, bea_data)
+        consuming_states = self._get_consuming_states(industry2_cat, bea_data)
         total_value = float(trade_row.get('amount', 0))
 
-        # Satellite factor data keyed by the actual Exiobase industry_id (5-char)
-        satellite = getattr(self, '_satellite_data', None)
         industry_id = str(trade_row.get('industry1', ''))
         industry2_id = str(trade_row.get('industry2', ''))
-        factor_entries = satellite.get(industry_id, []) if satellite else []
 
         trade_id = trade_row.get('trade_id', '')
+
+        industry = industry1_cat
 
         # First collect all candidate state-pair shares
         state_pairs = []
@@ -252,7 +374,7 @@ class StateTradeAnalyzer:
                     continue
 
                 raw_share = self._calculate_state_flow_share(
-                    origin_state, dest_state, industry, bea_data
+                    origin_state, dest_state, industry1_cat, industry2_cat, bea_data
                 )
 
                 if raw_share > 0:
@@ -273,46 +395,44 @@ class StateTradeAnalyzer:
                 f"{self.year}-{trade_id}-US-{origin_state}-US-{dest_state}-{industry}"
             )
 
-            if factor_entries:
-                for fid, coeff in factor_entries:
-                    flows.append({
-                        'interstate_id': interstate_id,
-                        'trade_id': trade_id,
-                        'factor_id': fid,
-                        'coefficient': coeff,
-                        'state_industry_code': industry,
-                        'level': level,
-                        'flow_type': 'inter_state',
-                        'employment_impact': 0,
-                        '_origin_state': origin_state,
-                        '_destination_state': dest_state,
-                        '_industry1': industry_id,
-                        '_industry2': industry2_id,
-                    })
-            else:
-                flows.append({
-                    'interstate_id': interstate_id,
-                    'trade_id': trade_id,
-                    'factor_id': -1,      
-                    'coefficient': 1.0,   
-                    'state_industry_code': industry,
-                    'level': level,
-                    'flow_type': 'inter_state',
-                    'employment_impact': 0,
-                    '_origin_state': origin_state,
-                    '_destination_state': dest_state,
-                    '_industry1': industry_id,
-                    '_industry2': industry2_id,
-                })
+            flows.append({
+                'interstate_id': interstate_id,
+                'trade_id': trade_id,
+                'factor_id': -1,
+                'coefficient': 1.0,
+                'state_industry_code': industry,
+                'level': level,
+                'flow_type': 'inter_state',
+                'employment_impact': 0.0,
+                '_origin_state': origin_state,
+                '_destination_state': dest_state,
+                '_industry1': industry_id,
+                '_industry2': industry2_id,
+            })
 
         return flows
+
+    def get_satellite_factor_entries(self, industry_id, limit=None):
+        """Return sorted Exiobase factor coefficients for a 5-character industry ID."""
+        satellite = getattr(self, '_satellite_data', None)
+        if not satellite:
+            return []
+
+        entries = satellite.get(str(industry_id), [])
+        if limit is None:
+            return entries
+        return entries[:limit]
  
     
     def _categorize_industry(self, industry_code):
         """Categorize industry code into broad category"""
         if not industry_code:
             return 'services'
-        
+
+        industry_code = str(industry_code).strip().upper()
+        if industry_code in self.industry_category_by_id:
+            return self.industry_category_by_id[industry_code]
+
         # Map industry codes to categories (simplified)
         if industry_code.startswith('31') or industry_code.startswith('32') or industry_code.startswith('33'):
             return 'manufacturing'
@@ -329,47 +449,130 @@ class StateTradeAnalyzer:
         else:
             return 'services'
     
-    def _get_producing_states(self, industry):
+    def _prepare_bea_allocation_cache(self, bea_data):
+        """Prepare fast lookups for BEA Regional allocation weights."""
+        if not isinstance(bea_data, pd.DataFrame) or bea_data.empty:
+            self._bea_allocation_source_id = None
+            self._bea_allocation_weight_lookup = {}
+            self._bea_allocation_ranked_states = {}
+            return False
+
+        source_id = id(bea_data)
+        if self._bea_allocation_source_id == source_id:
+            return bool(self._bea_allocation_weight_lookup)
+
+        data = bea_data.copy()
+        if 'state_industry_code' not in data.columns and 'allocation_category' in data.columns:
+            data = data.rename(columns={'allocation_category': 'state_industry_code'})
+
+        required_cols = {'state_industry_code', 'weight_type', 'state', 'weight'}
+        if not required_cols.issubset(data.columns):
+            self._bea_allocation_source_id = None
+            self._bea_allocation_weight_lookup = {}
+            self._bea_allocation_ranked_states = {}
+            return False
+
+        data = data[list(required_cols)].dropna()
+        data['state_industry_code'] = data['state_industry_code'].astype(str).str.lower().str.strip()
+        data['weight_type'] = data['weight_type'].astype(str).str.lower().str.strip()
+        data['state'] = data['state'].astype(str).str.upper().str.strip()
+        data['weight'] = pd.to_numeric(data['weight'], errors='coerce')
+        data = data[data['weight'] > 0]
+
+        if data.empty:
+            self._bea_allocation_source_id = None
+            self._bea_allocation_weight_lookup = {}
+            self._bea_allocation_ranked_states = {}
+            return False
+
+        data = data.groupby(
+            ['state_industry_code', 'weight_type', 'state'],
+            as_index=False,
+        )['weight'].sum()
+
+        weight_lookup = {
+            (row.state_industry_code, row.weight_type, row.state): float(row.weight)
+            for row in data.itertuples(index=False)
+        }
+
+        ranked_states = {}
+        for (category, weight_type), group in data.groupby(['state_industry_code', 'weight_type']):
+            ranked_states[(category, weight_type)] = (
+                group.sort_values('weight', ascending=False)['state'].tolist()
+            )
+
+        self._bea_allocation_source_id = source_id
+        self._bea_allocation_weight_lookup = weight_lookup
+        self._bea_allocation_ranked_states = ranked_states
+        return bool(weight_lookup)
+
+    def _get_bea_ranked_states(self, industry, weight_type, bea_data):
+        if not self._prepare_bea_allocation_cache(bea_data):
+            return []
+        return self._bea_allocation_ranked_states.get((industry, weight_type), [])
+
+    def _get_bea_weight(self, industry, weight_type, state, bea_data):
+        if not self._prepare_bea_allocation_cache(bea_data):
+            return None
+        return self._bea_allocation_weight_lookup.get(
+            (industry, weight_type, str(state).upper().strip())
+        )
+
+    def _get_producing_states(self, industry, bea_data=None):
         """Get states that are major producers in this industry"""
-        # Return states based on industry specialization
-        producing_states = []
-        
+        bea_states = self._get_bea_ranked_states(industry, 'origin', bea_data)
+        if bea_states:
+            return bea_states[:8]
+
+        producing_states = list(self.producing_states_by_industry.get(
+            industry,
+            self.default_producing_states
+        ))
+
+        # Add states from the placeholder specialization map when they match the
+        # broad category, but keep output cardinality bounded by the base list.
         for state, specializations in self.industry_state_mapping.items():
-            if industry in specializations:
+            if industry in specializations and state not in producing_states:
                 producing_states.append(state)
-        
-        # Add default major states if none found
+
         if not producing_states:
-            producing_states = ['CA', 'TX', 'NY', 'IL', 'FL', 'OH', 'PA', 'MI']
-        
-        return producing_states
+            producing_states = self.default_producing_states
+
+        return producing_states[:8]
     
-    def _get_consuming_states(self, industry):
+    def _get_consuming_states(self, industry, bea_data=None):
         """Get states that are major consumers in this industry"""
-        # For simplicity, use all major states as consumers
-        # In practice, this would be based on consumption patterns
-        return ['CA', 'TX', 'NY', 'FL', 'IL', 'PA', 'OH', 'MI', 'GA', 'NC', 'NJ', 'VA', 'WA', 'AZ', 'MA', 'IN', 'TN', 'MO', 'MD', 'WI']
+        bea_states = self._get_bea_ranked_states(industry, 'destination', bea_data)
+        if bea_states:
+            return bea_states[:20]
+
+        return self.default_consuming_states
     
-    def _calculate_state_flow_share(self, origin, destination, industry, bea_data):
+    def _calculate_state_flow_share(self, origin, destination, industry1_cat, industry2_cat, bea_data):
         """Calculate the share of flow between two states"""
+        origin_weight = self._get_bea_weight(industry1_cat, 'origin', origin, bea_data)
+        dest_weight = self._get_bea_weight(industry2_cat, 'destination', destination, bea_data)
+        if origin_weight is not None and dest_weight is not None:
+            return origin_weight * dest_weight
+
         # Base share using population/GDP proxies
         base_shares = {
-            'CA': 0.12, 'TX': 0.09, 'FL': 0.06, 'NY': 0.06, 'PA': 0.04, 
+            'CA': 0.12, 'TX': 0.09, 'FL': 0.06, 'NY': 0.06, 'PA': 0.04,
             'IL': 0.04, 'OH': 0.04, 'GA': 0.03, 'NC': 0.03, 'MI': 0.03
         }
-        
+
         origin_weight = base_shares.get(origin, 0.01)
         dest_weight = base_shares.get(destination, 0.01)
-        
+
         # Apply industry specialization modifier
         specialization_bonus = 1.0
         if origin in self.industry_state_mapping:
-            if industry in self.industry_state_mapping[origin]:
+            if industry1_cat in self.industry_state_mapping[origin]:
                 specialization_bonus = 1.5
-        
+
         # Calculate flow share (simplified allocation)
         flow_share = (origin_weight * dest_weight * specialization_bonus) / 100
-        
+
         return min(flow_share, 0.1)  # Cap at 10% of total flow
     
     def _calculate_employment_impacts(self, state_flows_df):
@@ -379,6 +582,8 @@ class StateTradeAnalyzer:
         
         print("    👥 Calculating employment impacts...")
         
+        state_flows_df['employment_impact'] = state_flows_df['employment_impact'].astype(float)
+
         for index, row in state_flows_df.iterrows():
             industry = row['state_industry_code']
             level = row['level']
@@ -442,8 +647,10 @@ class StateTradeAnalyzer:
         df['row_tax_revenue_impact'] = df['row_total_output_impact'] * df['tax_rate']
 
         # Aggregate flows by destination state and industry
+        state_col = '_origin_state' if '_origin_state' in df.columns else '_destination_state'
+
         state_industry_agg = df.groupby(
-            ['_destination_state', 'state_industry_code'],
+            [state_col, 'state_industry_code'],
             as_index=False
         ).agg({
             'level': 'sum',
@@ -451,11 +658,11 @@ class StateTradeAnalyzer:
             'row_total_output_impact': 'sum',
             'row_tax_revenue_impact': 'sum'
         })
-        
+
         impacts = []
-        
+
         for _, row in state_industry_agg.iterrows():
-            state = row['_destination_state']
+            state = row[state_col]
             industry = row['state_industry_code']
             direct_jobs = float(row['employment_impact'])
             
@@ -560,19 +767,19 @@ class StateTradeAnalyzer:
             s = amounts / t
             return round(float((s ** 2).sum()), 6)
 
-        state_industry_stats = interstate_df.groupby(['region2', 'industry1']).agg(
+        state_industry_stats = interstate_df.groupby(['region2', 'industry2']).agg(
             state_industry_imports_total=('amount', 'sum'),
             state_supplier_count=('region1', 'nunique'),
         )
         state_industry_hhi = (
-            interstate_df.groupby(['region2', 'industry1'])['amount']
+            interstate_df.groupby(['region2', 'industry2'])['amount']
             .apply(_hhi)
             .rename('state_import_concentration')
         )
         state_industry_stats = state_industry_stats.join(state_industry_hhi).reset_index()
 
-        result = interstate_df[['interstate_id', 'region2', 'industry1', 'amount']].merge(
-            state_industry_stats, on=['region2', 'industry1']
+        result = interstate_df[['interstate_id', 'region2', 'industry2', 'amount']].merge(
+            state_industry_stats, on=['region2', 'industry2']
         )
         result['state_source_share'] = (result['amount'] / result['state_industry_imports_total']).round(6)
         result['state_import_intensity'] = (result['state_industry_imports_total'] / total).round(6)

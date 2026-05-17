@@ -127,6 +127,8 @@ class ExiobaseTradeFlow:
         Apply filtering to create smaller trade_factor.csv using selected factors
         """
         partial_limit = self.config['PROCESSING'].get('partial_factor_limit', 50)
+        F_stacked = F_stacked.copy()
+        F_stacked['_abs_coefficient'] = F_stacked['coefficient'].abs()
         
         # Define priority factors for each extension
         priority_factors = {
@@ -147,14 +149,14 @@ class ExiobaseTradeFlow:
             
             # If we still have too many, select top ones by coefficient magnitude
             if len(priority_data) > partial_limit:
-                priority_data = priority_data.nlargest(partial_limit, 'coefficient')
+                priority_data = priority_data.nlargest(partial_limit, '_abs_coefficient')
             
             # If we have fewer than limit, add other significant factors
             remaining_limit = partial_limit - len(priority_data)
             if remaining_limit > 0:
                 other_data = F_stacked[~priority_mask].copy()
                 if len(other_data) > 0:
-                    other_significant = other_data.nlargest(remaining_limit, 'coefficient')
+                    other_significant = other_data.nlargest(remaining_limit, '_abs_coefficient')
                     F_stacked = pd.concat([priority_data, other_significant], ignore_index=True)
                 else:
                     F_stacked = priority_data
@@ -162,8 +164,9 @@ class ExiobaseTradeFlow:
                 F_stacked = priority_data
         else:
             # If no priority factors defined, select by coefficient magnitude
-            F_stacked = F_stacked.nlargest(partial_limit, 'coefficient')
+            F_stacked = F_stacked.nlargest(partial_limit, '_abs_coefficient')
         
+        F_stacked = F_stacked.drop(columns=['_abs_coefficient'], errors='ignore')
         print(f"    Selected {len(F_stacked)} factors from {ext_name} (partial factors mode)")
         return F_stacked
 
@@ -178,10 +181,9 @@ class ExiobaseTradeFlow:
             factors_file = get_reference_file_path(self.config, 'factors')
             factors_df = pd.read_csv(factors_file)
             
-            # Create a mapping from factor names to factor_ids
-            # Extract factor names from stressor column (format: "CO2 - combustion - air")
-            factors_df['name'] = factors_df['stressor'].str.split(' - ').str[0]
-            factor_mapping = dict(zip(factors_df['name'], factors_df['factor_id']))
+            # Create an exact mapping from Exiobase stressor names to factor_ids.
+            # Prefix-only names like "CO2" are ambiguous across multiple factors.
+            factor_mapping = dict(zip(factors_df['stressor'], factors_df['factor_id']))
             
             # Add robust mapping for common formatting variations
             robust_mapping = factor_mapping.copy()
@@ -208,40 +210,40 @@ class ExiobaseTradeFlow:
                     print(f"Processing {ext_name} factors for trade flows...")
                     ext = getattr(exio_model, ext_name)
                     
-                    if hasattr(ext, 'F'):
-                        F_matrix = ext.F
+                    if hasattr(ext, 'S'):
+                        S_matrix = ext.S
                         
-                        # Convert F matrix to a lookup format
-                        # F matrix: rows = factors, columns = (region, sector)
-                        F_stacked = F_matrix.stack(level=['region', 'sector'], future_stack=True).reset_index()
+                        # Convert S matrix to a lookup format.
+                        # S matrix values are physical intensity per unit output.
+                        F_stacked = S_matrix.stack(level=['region', 'sector'], future_stack=True).reset_index()
                         F_stacked.columns = ['stressor', 'region', 'sector', 'coefficient']
                         
                         # Filter for non-zero coefficients only and sample for performance
                         F_stacked = F_stacked[F_stacked['coefficient'] != 0].copy()
                         
                         # Keep ALL coefficients for comprehensive analysis
-                        print(f"  Found {len(F_stacked)} non-zero {ext_name} coefficients")
+                        print(f"  Found {len(F_stacked)} non-zero {ext_name} intensity coefficients")
                         
                         # Map sectors to industry IDs
                         F_stacked['industry_id'] = F_stacked['sector'].map(self.sector_mapping)
                         F_stacked = F_stacked.dropna(subset=['industry_id'])
                         
-                        # Extract flowable name for mapping
-                        F_stacked['flowable'] = F_stacked['stressor'].apply(lambda x: x.split(' - ')[0] if ' - ' in x else x)
-                        F_stacked['factor_id'] = F_stacked['flowable'].map(factor_mapping)
+                        # Keep exact stressor names for factor_id mapping. The
+                        # flowable field is used only for priority filtering.
+                        F_stacked['flowable'] = F_stacked['stressor'].astype(str)
+                        F_stacked['factor_id'] = F_stacked['stressor'].map(factor_mapping)
                         F_stacked = F_stacked.dropna(subset=['factor_id'])
                         
-                        # EMPLOYMENT UNIT CONVERSION FIX
-                        # Handle employment factors with proper unit normalization
+                        # Employment S coefficients are already in their factor
+                        # units per unit output. No additional unit scaling is
+                        # applied here.
                         if ext_name == 'employment':
-                            print(f"  Applying employment unit conversion for {len(F_stacked)} employment factors")
+                            print(f"  Using employment intensity coefficients for {len(F_stacked)} employment factors")
                             
                             # Employment people: stressor contains "Employment people:" with "1000 p" units
-                            # These coefficients are already in "per 1000 people" so they're correctly scaled
                             employment_people_mask = F_stacked['stressor'].str.contains('Employment people:', case=False, na=False)
                             
-                            # Employment hours: stressor contains "Employment hours:" with "M.hr" units  
-                            # These coefficients are in "million hours per unit" - need to normalize to same scale as people
+                            # Employment hours: stressor contains "Employment hours:" with "M.hr" units
                             employment_hours_mask = F_stacked['stressor'].str.contains('Employment hours:', case=False, na=False)
                             
                             # For debugging - show what employment factors we're processing
@@ -252,18 +254,6 @@ class ExiobaseTradeFlow:
                             if employment_hours_mask.any():
                                 hours_count = employment_hours_mask.sum()
                                 print(f"    Found {hours_count} employment hours factors (M.hr units)")
-                                
-                                # Convert employment hours coefficients to be comparable with employment people
-                                # Scale down hours by factor of 1000 to normalize units (M.hr -> 1000.hr equivalent)
-                                # This ensures that when trade_impact.py applies conversions, the final values are realistic
-                                original_hours_coeff = F_stacked.loc[employment_hours_mask, 'coefficient'].copy()
-                                F_stacked.loc[employment_hours_mask, 'coefficient'] *= 0.001  # Scale down by 1000
-                                
-                                # Debug output for coefficient scaling
-                                if len(original_hours_coeff) > 0:
-                                    print(f"    Scaled employment hours coefficients: {original_hours_coeff.mean():.6f} → {F_stacked.loc[employment_hours_mask, 'coefficient'].mean():.6f}")
-                            
-                            # Note: Employment people factors are kept as-is since they're already in appropriate 1000p units
                         
                         # Apply partial factors filtering if not using large factors
                         if not self.use_large_factors and self.config['PROCESSING'].get('use_partial_factors', True):
@@ -528,7 +518,7 @@ class ExiobaseTradeFlow:
         # Parse the downloaded Exiobase data
         try:
             print(f"Parsing Exiobase file: {exio_file}")
-            exio_model = pymrio.parse_exiobase3(exio_file)
+            exio_model = pymrio.parse_exiobase3(exio_file).calc_all()
             return exio_model
         except Exception as e:
             print(f"Parsing failed: {e}")
@@ -612,6 +602,14 @@ class ExiobaseTradeFlow:
             'to_region': 'region2',
             'flow': 'amount'
         })
+
+        # Keep the historical 2dp trade.csv format, but do not carry rows that
+        # would be written as 0.00 into trade_factor.csv or BEA interstate data.
+        rounded_zero_rows = trade_data['amount'].round(2) <= 0
+        if rounded_zero_rows.any():
+            removed_count = int(rounded_zero_rows.sum())
+            trade_data = trade_data[~rounded_zero_rows].copy()
+            print(f"Removed {removed_count} flows that round to 0.00 at 2 decimals")
         
         # Add year column
         trade_data['year'] = self.year

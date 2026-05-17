@@ -367,3 +367,6 @@ exiobase_data
 trade_factors_lg.csv
 
 .DS_Store
+
+# BEA API response cache (regenerated locally)
+tradeflow/bea/bea_cache/

@@ -85,7 +85,7 @@
 > Once resolved, document the answer in `README.md` and check the box here.
 
 - [ ] For the renamed BEA columns, what are the preferred final names: `commodity_code` / `industry_code`, or domain-specific alternatives?
-- [ ] What does `economic_multiplier` represent, and is that the intended final column name?
+- [x] What does `economic_multiplier` represent, and is that the intended final column name?
 - [ ] Should `trade_price_indices.csv` be generated for all three tradeflows (`domestic`, `imports`, `exports`) or only selected ones?
 - [ ] Is `trade_factor_bea.csv` a required SQL deliverable, or should `trade_factor.csv` remain the single factor table?
 - [ ] In `interstate_factor.csv`, is `state_industry_code` the same as `industry_id` from `industry.csv`, or a separate BEA-specific code?

@@ -2,7 +2,7 @@ NOTES:
   1: COUNTRY.list "default" = run only incomplete ones within these 12 AU, BR, CA, CN, DE, FR, GB, IN, IT, JP, KR, US
   2: COUNTRY.list "all" = run all (could take hours)
 TRADEFLOW: domestic,imports,exports
-YEAR: 2020
+YEAR: 2019
 COUNTRY:
   list: US
 NODES:
@@ -77,5 +77,5 @@ PROCESSING:
   partial_factor_limit: 120
   use_partial_factors_domestic: false
   partial_factor_limit_domestic: 2000
-  partial_factor_limit_interstate: 50
+  partial_factor_limit_interstate: 5
   use_partial_factors_interstate: true

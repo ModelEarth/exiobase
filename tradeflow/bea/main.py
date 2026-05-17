@@ -19,6 +19,7 @@ import numpy as np
 import time
 import argparse
 import os
+import csv
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -33,6 +34,26 @@ from config_loader import load_config, get_file_path, get_reference_file_path
 from main_api_client import BEAAPIClient
 from main_trade_analyzer import StateTradeAnalyzer
 from main_fedefl_integration import FEDEFLIntegrator
+
+BEA_ORIGIN_ALLOCATION_LINES = {
+    'agriculture': ('SAGDP2', 3, 'GDP by state: Agriculture, forestry, fishing and hunting'),
+    'mining': ('SAGDP2', 6, 'GDP by state: Mining, quarrying, oil, and gas extraction'),
+    'utilities': ('SAGDP2', 10, 'GDP by state: Utilities'),
+    'construction': ('SAGDP2', 11, 'GDP by state: Construction'),
+    'manufacturing': ('SAGDP2', 12, 'GDP by state: Manufacturing'),
+    'transportation': ('SAGDP2', 36, 'GDP by state: Transportation and warehousing'),
+    'services': ('SAGDP2', 92, 'GDP by state: Private services-providing industries'),
+}
+
+BEA_DESTINATION_ALLOCATION_LINES = {
+    'agriculture':    ('SAGDP2', 3,  'GDP by state: Agriculture, forestry, fishing and hunting'),
+    'mining':         ('SAGDP2', 6,  'GDP by state: Mining, quarrying, oil, and gas extraction'),
+    'utilities':      ('SAGDP2', 10, 'GDP by state: Utilities'),
+    'construction':   ('SAGDP2', 11, 'GDP by state: Construction'),
+    'manufacturing':  ('SAGDP2', 12, 'GDP by state: Manufacturing'),
+    'transportation': ('SAGDP2', 36, 'GDP by state: Transportation and warehousing'),
+    'services':       ('SAGDP2', 92, 'GDP by state: Private services-providing industries'),
+}
 
 class USBEATradeFlow:
     def __init__(self, bea_api_key=None, force_regeneration=False, use_bea_placeholder=False):
@@ -309,6 +330,8 @@ class USBEATradeFlow:
         258              The Use of Commodities by Industries - Sector
         NOTE: BEA API tables use numeric IDs rather than labels. For reference: https://github.com/us-bea/beaapi/blob/main/docs/example_tables.ipynb """
         print("  Fetching US-BEA domestic data...")
+        self.bea_domestic_data = pd.DataFrame()
+        self.bea_state_allocation_data = pd.DataFrame()
         
         try:
             # Input-Output Tables
@@ -324,6 +347,123 @@ class USBEATradeFlow:
             print(f"    US-BEA domestic data unavailable: {e}")
             self.bea_domestic_data = pd.DataFrame()
             self.validation_issues.append(f"US-BEA domestic API error: {e}")
+
+        try:
+            self._fetch_bea_state_allocation_data()
+        except Exception as e:
+            print(f"    US-BEA Regional allocation data unavailable: {e}")
+            self.bea_state_allocation_data = pd.DataFrame()
+            self.validation_issues.append(f"US-BEA Regional allocation API error: {e}")
+
+    def _fetch_bea_state_allocation_data(self):
+        """Fetch BEA Regional state weights used for interstate allocation."""
+        print("  Fetching BEA Regional state allocation weights...")
+
+        allocation_frames = []
+
+        for weight_type, line_map in (
+            ('origin', BEA_ORIGIN_ALLOCATION_LINES),
+            ('destination', BEA_DESTINATION_ALLOCATION_LINES),
+        ):
+            for category, (table_name, line_code, description) in line_map.items():
+                response = self.bea_client.get_regional_data(
+                    year=self.config['YEAR'],
+                    table_name=table_name,
+                    line_code=line_code,
+                )
+                regional_df = self.bea_client.process_regional_response(response)
+                weights = self._build_state_allocation_weights(
+                    regional_df,
+                    category,
+                    weight_type,
+                    table_name,
+                    line_code,
+                    description,
+                )
+                if not weights.empty:
+                    allocation_frames.append(weights)
+
+        if not allocation_frames:
+            self.bea_state_allocation_data = pd.DataFrame()
+            print("    No BEA Regional allocation weights returned")
+            return
+
+        self.bea_state_allocation_data = pd.concat(
+            allocation_frames,
+            ignore_index=True,
+            copy=False,
+        ).sort_values(
+            ['state_industry_code', 'weight_type', 'weight'],
+            ascending=[True, True, False],
+        )
+
+        category_count = self.bea_state_allocation_data['state_industry_code'].nunique()
+        state_count = self.bea_state_allocation_data['state'].nunique()
+        print(
+            f"    Retrieved BEA Regional allocation weights "
+            f"({len(self.bea_state_allocation_data)} rows, {category_count} categories, {state_count} states)"
+        )
+
+    def _build_state_allocation_weights(
+        self,
+        regional_df,
+        category,
+        weight_type,
+        table_name,
+        line_code,
+        description,
+    ):
+        """Convert a BEA Regional response into normalized state allocation weights."""
+        required_cols = {'state_name', 'value'}
+        if regional_df.empty or not required_cols.issubset(regional_df.columns):
+            return pd.DataFrame()
+
+        state_lookup = dict(zip(
+            self.state_analyzer.state_codes['state_name'],
+            self.state_analyzer.state_codes['state_code'],
+        ))
+
+        weights = regional_df.copy()
+        weights['state_name'] = (
+            weights['state_name']
+            .astype(str)
+            .str.replace('*', '', regex=False)
+            .str.strip()
+        )
+        weights['state'] = weights['state_name'].map(state_lookup)
+        weights['value'] = pd.to_numeric(weights['value'], errors='coerce')
+        weights = weights[weights['state'].notna() & (weights['value'] > 0)]
+
+        if weights.empty:
+            return pd.DataFrame()
+
+        weights = weights.groupby(['state', 'state_name'], as_index=False)['value'].sum()
+        total_value = weights['value'].sum()
+        if total_value <= 0:
+            return pd.DataFrame()
+
+        weights['weight'] = weights['value'] / total_value
+        weights['year'] = self.config['YEAR']
+        weights['state_industry_code'] = category
+        weights['weight_type'] = weight_type
+        weights['source_table'] = table_name
+        weights['line_code'] = line_code
+        weights['source_description'] = description
+
+        return weights[
+            [
+                'year',
+                'state_industry_code',
+                'state',
+                'state_name',
+                'weight_type',
+                'weight',
+                'value',
+                'source_table',
+                'line_code',
+                'source_description',
+            ]
+        ]
     
     def _create_interstate_csvfiles(self):
         """Create enhanced trade detail with US-BEA data integration"""
@@ -553,15 +693,16 @@ class USBEATradeFlow:
                     print(f"    Exiobase zip not found at {exiobase_zip}")
                     print("    interstate_factor.csv will be generated without factor_id")
 
-                # Use US state analyzer to disaggregate flows
-                bea_data = getattr(self, 'bea_domestic_data', pd.DataFrame())
-                if bea_data.empty and not self.use_bea_placeholder:
+                # Use BEA Regional weights for state allocation when available.
+                bea_domestic_data = getattr(self, 'bea_domestic_data', pd.DataFrame())
+                allocation_data = getattr(self, 'bea_state_allocation_data', pd.DataFrame())
+                if bea_domestic_data.empty and allocation_data.empty and not self.use_bea_placeholder:
                     print("    ⛔ BEA state data unavailable — skipping state disaggregation.")
                     print("    interstate.csv and interstate_factor.csv will not be generated.")
                     return
 
                 state_flows = self.state_analyzer.disaggregate_domestic_flows(
-                    base_trade, bea_data
+                    base_trade, allocation_data
                 )
                 
                 # Save results
@@ -598,16 +739,13 @@ class USBEATradeFlow:
                     # merge BEA domestic columns using concordance
                     interstate_df = self._merge_bea_domestic(interstate_df)
 
-                    # Calculate state impacts FROM enriched interstate rows
                     impact_input = interstate_df[[
-                        'region2',
+                        'region1',
                         'state_industry_code',
                         'amount',
                         'employment_impact',
                         'economic_multiplier'
-                    ]].rename(columns={
-                        'region2': '_destination_state'
-                    }).copy()
+                    ]].rename(columns={'region1': '_origin_state'}).copy()
 
                     state_impacts = self.state_analyzer.calculate_state_industry_impacts(impact_input)
 
@@ -631,48 +769,32 @@ class USBEATradeFlow:
                     interstate_df.to_csv(output_path / 'interstate.csv', index=False)
                     print(f"    ✅ Created interstate.csv ({len(interstate_df)} state-pair rows)")
 
-                    # Compute level = level × coefficient
-                    state_flows['level'] = state_flows['level'] * state_flows['coefficient']
-
                     # Round: 3 decimals for water/air_emissions, 0 for other extensions
                     factors_ref_path = Path(get_reference_file_path(self.config, 'factors'))
                     if not factors_ref_path.exists():
                         print(f"    ❌ factor.csv not found at {factors_ref_path} — cannot apply extension-based rounding. Stopping.")
                         return
-                    ext_map = pd.read_csv(factors_ref_path)[['factor_id', 'extension']]
-                    state_flows = state_flows.merge(ext_map, on='factor_id', how='left')
-                    fine = state_flows['extension'].isin(('water', 'air_emissions'))
-                    missing = state_flows['extension'].isna()
-                    state_flows.loc[fine,             'level'] = state_flows.loc[fine,             'level'].round(3)
-                    state_flows.loc[missing,          'level'] = state_flows.loc[missing,          'level'].round(3)
-                    state_flows.loc[~fine & ~missing, 'level'] = state_flows.loc[~fine & ~missing, 'level'].round(0).astype(int)
-                    state_flows = state_flows.drop(columns=['extension'])
-
-                    factor_cols = ['interstate_id', 'factor_id', 'level']
+                    factors_df = pd.read_csv(factors_ref_path, usecols=['factor_id', 'extension'])
+                    ext_by_factor = dict(zip(factors_df['factor_id'], factors_df['extension']))
 
                     # Optionally generate large file (all 721 factors)
                     if not use_partial:
                         lg_file = self.config['FILES'].get('interstate_factor_lg', 'interstate_factor_lg.csv')
-                        state_flows[factor_cols].to_csv(output_path / lg_file, index=False)
-                        print(f"    ✅ Created {lg_file} ({len(state_flows)} rows, all factors)")
-
-                    # Filter to top partial_limit factors per industry and save
-                    satellite = self.state_analyzer._satellite_data
-                    lookup_rows = [
-                        {'_industry1': iid, 'factor_id': fid}
-                        for iid, entries in satellite.items()
-                        for fid, _ in entries[:partial_limit]
-                    ]
-                    if lookup_rows:
-                        top_factors_df = pd.DataFrame(lookup_rows)
-                        state_flows_limited = state_flows.merge(
-                            top_factors_df, on=['_industry1', 'factor_id'], how='inner'
+                        lg_count = self._write_interstate_factor_file(
+                            state_flows,
+                            output_path / lg_file,
+                            ext_by_factor,
+                            factor_limit=None,
                         )
-                    else:
-                        state_flows_limited = state_flows.copy()
+                        print(f"    ✅ Created {lg_file} ({lg_count} rows, all factors)")
 
-                    state_flows_limited[factor_cols].to_csv(output_path / 'interstate_factor.csv', index=False)
-                    print(f"    ✅ Created interstate_factor.csv ({len(state_flows_limited)} rows, {partial_limit} Selected Factors)")
+                    factor_count = self._write_interstate_factor_file(
+                        state_flows,
+                        output_path / 'interstate_factor.csv',
+                        ext_by_factor,
+                        factor_limit=partial_limit,
+                    )
+                    print(f"    ✅ Created interstate_factor.csv ({factor_count} rows, {partial_limit} Selected Factors)")
 
                 else:
                     # No satellite data — drop internal cols and save as-is
@@ -692,6 +814,37 @@ class USBEATradeFlow:
         finally:
             # Restore original config
             self.config['TRADEFLOW'] = original_tradeflow
+
+    def _write_interstate_factor_file(self, state_flows, output_file, ext_by_factor, factor_limit=None):
+        """Stream interstate factor rows without materializing the full factor table."""
+        row_count = 0
+        factor_cols = ['interstate_id', 'factor_id', 'level']
+
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(factor_cols)
+
+            for interstate_id, industry_id, amount in state_flows[
+                ['interstate_id', '_industry1', 'level']
+            ].itertuples(index=False, name=None):
+                entries = self.state_analyzer.get_satellite_factor_entries(
+                    industry_id,
+                    limit=factor_limit,
+                )
+
+                for factor_id, coefficient in entries:
+                    level = float(amount) * float(coefficient)
+                    extension = ext_by_factor.get(factor_id)
+
+                    if extension in ('water', 'air_emissions') or pd.isna(extension):
+                        level_out = round(level, 3)
+                    else:
+                        level_out = int(round(level))
+
+                    writer.writerow([interstate_id, factor_id, level_out])
+                    row_count += 1
+
+        return row_count
     
     def _analyze_state_export_competitiveness(self):
         """State export competitiveness from domestic interstate.csv (region1=origin state)."""
@@ -758,13 +911,19 @@ class USBEATradeFlow:
             # Load comprehensive FEDEFL flows
             factors_file_str = get_reference_file_path(self.config, 'factors')
             output_path = Path(factors_file_str).parent
-            
-            flow_data = self.fedefl_integrator.create_comprehensive_flow_table(output_path)
-            
-            # Validate flow completeness with trade factors
+
+            # Load factor-derived flows before writing flow.csv so the output is
+            # complete even when only one tradeflow is processed.
             factors_file = Path(factors_file_str)
+            factors = pd.DataFrame()
             if factors_file.exists():
                 factors = pd.read_csv(factors_file)
+                self.fedefl_integrator.map_factors_to_flows(factors)
+
+            flow_data = self.fedefl_integrator.create_comprehensive_flow_table(output_path)
+
+            # Validate flow completeness with trade factors
+            if not factors.empty:
                 self.fedefl_integrator.validate_flow_completeness(factors, output_path)
             
             print(f"    Created US-FEDEFL flow integration with {len(flow_data)} flows")
@@ -875,7 +1034,7 @@ class USBEATradeFlow:
             f.write(f"\n### BEA API Usage Statistics\n")
             f.write(f"- API calls made: {api_stats['api_calls_made']}\n")
             f.write(f"- Cache files created: {api_stats['cache_files']}\n")
-            
+
             f.write(f"\n## BEA Enhanced Output Files Generated\n\n")
             f.write(f"### Enhanced Relational Tables\n")
             f.write(f"- `trade.csv` - Base trade flows\n")

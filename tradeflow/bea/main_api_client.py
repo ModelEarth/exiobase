@@ -104,6 +104,27 @@ class BEAAPIClient:
         }
         
         return self._make_cached_request('gdp_by_industry', params)
+
+    def get_regional_data(self, year, table_name, line_code, geo_fips='STATE'):
+        """
+        Get BEA Regional data for state allocation weights.
+
+        Examples:
+        - SAGDP2: GDP by state and industry
+        - SAPCE3: PCE by state and product type
+        """
+        params = {
+            'UserID': self.api_key,
+            'Method': 'GetData',
+            'DataSetName': 'Regional',
+            'TableName': table_name,
+            'LineCode': str(line_code),
+            'GeoFIPS': geo_fips,
+            'Year': str(year),
+            'ResultFormat': 'JSON'
+        }
+
+        return self._make_cached_request(f'regional_{table_name}_{line_code}', params)
     
     def _make_cached_request(self, data_type, params):
         """Make API request with caching"""
@@ -214,6 +235,45 @@ class BEAAPIClient:
             print(f"    ⚠️ Error processing I-O response: {e}")
             return pd.DataFrame()
     
+    def process_regional_response(self, response_data):
+        """Process BEA Regional API response into DataFrame."""
+        try:
+            results = response_data.get('BEAAPI', {}).get('Results', {})
+
+            if isinstance(results, list):
+                results = results[0] if results else {}
+
+            data = results.get('Data', [])
+            df = pd.DataFrame(data)
+
+            if df.empty:
+                return df
+
+            column_mapping = {
+                'TimePeriod': 'year',
+                'GeoFips': 'geo_fips',
+                'GeoName': 'state_name',
+                'DataValue': 'value',
+                'Code': 'code',
+                'CL_UNIT': 'unit',
+                'UNIT_MULT': 'unit_mult'
+            }
+            df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+
+            if 'value' in df.columns:
+                df['value'] = (
+                    df['value']
+                    .astype(str)
+                    .str.replace(',', '', regex=False)
+                    .pipe(pd.to_numeric, errors='coerce')
+                )
+
+            return df
+
+        except Exception as e:
+            print(f"    ⚠️ Error processing Regional response: {e}")
+            return pd.DataFrame()
+
     def _standardize_trade_columns(self, df):
         """Standardize trade data column names and types"""
         if df.empty:

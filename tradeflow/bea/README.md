@@ -99,7 +99,7 @@ From March 27, 2026 - AM
 - Domestic processing took ~2.5 hours (9,234 seconds) - not yet confirmed, driven by the satellite disaggregation generating 75M state-to-state flow records before filtering to 68M
 - Imports and exports completed quickly (56s and 1,007s) using existing base data
 - BEA API was unavailable (empty response), so those enhancements were skipped
-- FEDEFL online source returned 404, so local fallback flows were used (24 flows for domestic)
+- FEDEFL uses the official workbook when available and built-in compatible flows as the offline fallback.
 
 # Tables Name and Column Design
 
@@ -142,6 +142,13 @@ commodity_code, industry_code, economic_multiplier
 
 The interstate.amount is tradeflow amount allocated to a specific state (region) pair and industry pair.
 
+**economic_multiplier** is the BEA Input-Output total industry output requirement for the mapped BEA Summary `industry_code`. It is used to estimate total output impact:
+
+```text
+total_output_impact = interstate.amount * economic_multiplier
+```
+
+The value comes from BEA InputOutput TableID 61 rows where `RowDescr` is `Total industry output requirement`. If no BEA match is found, the fallback is `1.0`.
 
 ## interstate_factor
 
@@ -314,7 +321,7 @@ Fallback values (used only with `--use-bea-placeholder` when API is unavailable)
 | `export_value` | exports | IntlServTrade | copied from `trade.csv amount` |
 | `economic_multiplier` | domestic | InputOutput | `1.0` |
 
-Note: The BEA API responses are fetched and cached but the per-row merge into `interstate.csv` columns is not yet fully implemented — all rows currently receive the fallback values above regardless of API availability.
+For domestic rows, `economic_multiplier` is populated from BEA Input-Output TableID 61 rows whose `RowDescr` is `Total industry output requirement`, matched by BEA Summary `industry_code`. Rows without a BEA multiplier match keep the fallback value `1.0`.
 
 **Uses:**
 - BEA API key from `docker/.env` or `webroot/.env` (`BEA_API_KEY=...`) or `--bea-key` argument
@@ -365,9 +372,11 @@ Invoked automatically by `main.py` — domestic tradeflow triggers state disaggr
 Federal LCA Commons Elementary Flow List (FEDEFL) integration for environmental flow metadata and factor-to-flow mapping. Called during Phase 4 (FEDEFL Integration) of each tradeflow.
 
 **Uses:**
-- FEDEFL online source: `https://fedelemflowlist.github.io/fedelemflowlist/` (flows.json and contexts.json)
-  Falls back to 24 built-in flows if offline: 10 air emissions (CO₂, CH₄, N₂O, SO₂, NOₓ, PM, CO, VOC, NH₃, benzene), 6 water emissions (BOD, COD, suspended solids, total N, total P, heavy metals), 5 resources (water, energy, land, fossil fuel, mineral), 3 economic flows (employment, value added, tax revenue)
+- Official FEDEFL flow list workbook by default: `https://dmap-data-commons-ord.s3.amazonaws.com/fedelemflowlist/FedElemFlowList_1.3.0_all.xlsx`
+- Optional override with `FEDEFL_FLOWLIST_URL` for a newer workbook URL or local workbook path
+- 24 built-in FEDEFL-compatible seed flows only as a fallback when the workbook is unavailable: 10 air emissions (CO₂, CH₄, N₂O, SO₂, NOₓ, PM, CO, VOC, NH₃, benzene), 6 water emissions (BOD, COD, suspended solids, total N, total P, heavy metals), 5 resources (water, energy, land, fossil fuel, mineral), 3 economic flows (employment, value added, tax revenue)
 - `year/[year]/factor.csv` — trade factor definitions, passed in for completeness validation
+- Common Exiobase air-emission labels are normalized before matching, for example `CO2 - combustion - air` maps to the FEDEFL `Carbon dioxide` row with context `emission/air`. Fuzzy FEDEFL matching is limited to air emissions; land, water, material, energy, and employment factors stay as Exiobase-derived rows unless an exact FEDEFL flowable is found.
 
 **Generates:**
 - `year/[year]/flow.csv` — comprehensive FEDEFL flow table
@@ -380,7 +389,7 @@ Invoked automatically by `main.py`. To test flow loading in isolation:
 ```bash
 # Run from exiobase/tradeflow/bea/
 python -c "
-from us_fedefl_integration import FEDEFLIntegrator
+from main_fedefl_integration import FEDEFLIntegrator
 f = FEDEFLIntegrator()
 flows = f.load_fedefl_flows()
 print(f'{len(flows)} flows loaded')
@@ -469,4 +478,3 @@ The 2012 NAICS Code 331313 was split into 2017 NAICS 331313 and 33131B for recla
   - Germany, France, etc. → Each has its own regional accounts
 
 The state disaggregation method (allocating national Exiobase flows using BEA employment/output weights) could serve as a template for other countries if their statistical agency data were available.
-
