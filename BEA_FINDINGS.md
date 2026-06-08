@@ -164,3 +164,24 @@ Recommendation:
     3. documentation-only artifact
 
 Current implementation appears to use trade_factor.csv as the active factor table.
+
+## 9. trade_price_indices.csv runtime status
+
+Status: Investigated
+
+Findings:
+- trade_price_indices.csv exists for 2019, 2020, and 2021.
+- It exists under all three US tradeflows:
+    domestic
+    imports
+    exports
+- Current implementation generates placeholder/default rows from trade.csv.
+- README references saying "currently empty" appear outdated.
+
+Evidence:
+- find ../../trade-data -name "trade_price_indices.csv"
+- tradeflow/bea/main.py:_create_trade_price_indices
+
+Recommendation:
+- Update README/PLAN after owner confirmation to describe this as a placeholder/default-value table, not an empty 
+table.
