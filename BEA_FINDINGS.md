@@ -141,3 +141,26 @@ Findings:
 Recommendation:
 - Clarify whether interstate_factor.csv is intended to contain actual Exiobase factor assignments.
 - README description appears inconsistent with current implementation.
+
+## 8. trade_factor_bea.csv runtime status
+
+Status: Investigated
+
+Findings:
+- Search across tradeflow codebase found references only in:
+    - tradeflow/bea/README.md
+    - tradeflow/bea/PLAN.md
+- No Python generation code found.
+- No output writers found.
+- No SQL ingestion references found.
+
+Evidence:
+- grep -RIn "trade_factor_bea" tradeflow .
+
+Recommendation:
+- Confirm with product owner whether trade_factor_bea.csv is:
+    1. future planned output
+    2. deprecated output
+    3. documentation-only artifact
+
+Current implementation appears to use trade_factor.csv as the active factor table.
