@@ -185,3 +185,25 @@ Evidence:
 Recommendation:
 - Update README/PLAN after owner confirmation to describe this as a placeholder/default-value table, not an empty 
 table.
+
+## 10. bea_industry_mapping.csv status
+
+Status: Investigated
+
+Findings:
+- bea_industry_mapping.csv exists in older 2019 trade-data outputs:
+    - year/2019/US/domestic
+    - year/2019/US/imports
+    - year/2019/US/exports
+- No active Python generation code was found in tradeflow/bea.
+- Current bea/main.py references it only in a comment and indicates the shared year/{year}/industry.csv is used 
+instead.
+- No 2020 or 2021 bea_industry_mapping.csv outputs were found.
+
+Evidence:
+- find ../../trade-data -name "bea_industry_mapping.csv"
+- grep -RIn "bea_industry_mapping" tradeflow tradeflow/bea .
+
+Recommendation:
+- Treat bea_industry_mapping.csv as legacy output unless Loren confirms otherwise.
+- PLAN.md item appears mostly complete in code, but old 2019 files and documentation references remain.
