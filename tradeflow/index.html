@@ -295,7 +295,8 @@ waitForLocalsiteJs();
       ['trade_factor',    'factor',            'factor_id'],
       ['interstate',      'industry',          'industry1/2'],
       ['interstate',      'trade',             'trade_id (US domestic)'],
-      ['interstate_factor','interstate',       'trade_id'],
+      ['interstate_factor','interstate',       'interstate_id'],
+      ['interstate_factor','factor',           'factor_id'],
     ];
 
     // Compute box heights
@@ -526,8 +527,8 @@ waitForLocalsiteJs();
       factor:   [{name:'factor_id',type:'integer'},{name:'unit',type:'varchar(50)'},{name:'stressor',type:'text'},{name:'extension',type:'varchar(100)'}],
       trade:    [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(10)'},{name:'country',type:'varchar(10)'}],
       trade_factor: [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
-      interstate: [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
-      interstate_factor: [{name:'id',type:'bigserial'},{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'state_industry_code',type:'varchar(30)'},{name:'level',type:'numeric'},{name:'flow_type',type:'varchar(20)'},{name:'employment_impact',type:'numeric'}]
+      interstate: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'state_industry_code',type:'varchar(30)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
+      interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'factor_id',type:'integer'},{name:'level',type:'numeric'}]
     };
   }
 

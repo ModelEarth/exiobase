@@ -1,5 +1,5 @@
 TO DO: Eliminate "id" (bigserial) since tables have trade_id, factor_id, industry_id
-TO DO: Include a factor_id in the interstate_factor table to related to factor table.
+DONE: `interstate_factor.csv` includes `factor_id` and relates to `factor.csv` through `factor.factor_id`.
 
 # Primary tables: <span style="color:#aaa">trade, factor, industry</span>
 
@@ -77,6 +77,7 @@ The main.py command generates the following CSV files for each country/tradeflow
 **120 Selected Factors:** Since each trade flow row gets one row per factor, the row count scales linearly — 120 factors produces 16.6% as many rows as 721 factors (120 / 721 = 16.6%). The top 120 are selected per industry from 721 total Exiobase stressors (air emissions, employment, energy, land, material, water extensions) by ranking all stressors whose absolute S-matrix coefficient meets `min_impact_threshold` (0.001) in descending order and keeping the first `partial_factor_limit` (120). `trade_factor_lg.csv` retains all 721 factors and is generated for domestic flows where the larger file is manageable.
 
 The bea/main.py command generates the following CSV files for US domestic flows:
-- `interstate_factor.csv` — state-to-state flows with `factor_id` + `coefficient` (120 Selected Factors, same selection method as `trade_factor.csv`)
+- `interstate_factor.csv` — state-to-state factor flows with `interstate_id`, `factor_id`, and `level`; joins to `interstate.csv` through `interstate_id` 
+ and `factor.csv` through `factor_id`
 - `interstate_factor_lg.csv` — same with all 721 factors (set `use_partial_factors_interstate: false` in config.yaml)
 
