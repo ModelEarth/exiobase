@@ -4,6 +4,27 @@
 
 The US-BEA data integration here combines Exiobase MRIO data with US Bureau of Economic Analysis API data to generate relational trade flow tables. This system extends our existing exiobase/tradeflow architecture to include detailed US trade analysis with enhanced state-level and industry-specific insights. Developed by referencing [US generate_import_factors.py](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors).
 
+### BEA Factor Aggregation
+
+The BEA interstate workflow now assigns real Exiobase factor IDs to state-to-state flows by 
+loading the Exiobase satellite S matrix with `pymrio`, mapping stressors to `factor.csv`, and 
+writing selected factor levels to `interstate_factor.csv`.
+
+EPA's published USEEIO import-factor outputs are much smaller because they map raw MRIO factors 
+into reduced reporting groups and then aggregate by reporting dimensions such as Region, Sector, 
+and Flow metadata before writing CSVs. Filtering to greenhouse-gas factors alone is not enough 
+to match EPA-sized outputs; aggregation is the major reduction step.
+
+For additional details, see the detailed notes in [interstate_factor](#interstate_factor), [50 
+Selected 
+Factors](#50-selected-factors), and [EPA import factor reduction](#epa-import-factor-reduction).
+
+Related pages:
+- [US interstate trade map](../../../profile/trade/map/state.html)
+- [State Sankey chart](../../../profile/charts/sankey/state.html#state=CO)
+- [International trade map](../../../profile/trade/map)
+
+
 The following US BEA integration with Exiobase international trade flow data uses the [industry.csv file](https://github.com/ModelEarth/trade-data/blob/main/year/2019/industry.csv) from the separate Exiobase pull of US domestic commodity flow. Industry columns are: industry_id and name (the exiobase sector information).
 
 The term "level" is instead of "flow_value" or "impact_value".
@@ -23,7 +44,8 @@ Each factor level is one of 6 units. (These apply to all 721 factors.)
 We use 50 of 721 factors per interstate trade.
 (120 factors resulted in a 5 GB interstate_factor file.)
 
-We don't save a "coefficient" column since it can be derived from "trade.amount" divided by the "trade_factor.level")
+We don't save a "coefficient" column since it can be derived from `trade_factor.level / 
+trade.amount`, and from `interstate_factor.level / interstate.amount`.
 
 Both trade.amount and interstate.amount are in Euros to sync with Exiobase.
 TO DO: We need to add a euro_dollar lookup by year.
