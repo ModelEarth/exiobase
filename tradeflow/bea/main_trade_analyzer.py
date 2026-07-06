@@ -675,7 +675,8 @@ class StateTradeAnalyzer:
             induced_jobs = direct_jobs * multipliers['induced']
             
             impacts.append({
-                'region': f'US-{state}',
+                'region1': f'US-{state}',
+		'region2': f'US-{state}',
                 'industry_code': industry,
                 'direct_jobs': direct_jobs,
                 'indirect_jobs': indirect_jobs, 

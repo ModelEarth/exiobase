@@ -795,9 +795,22 @@ class USBEATradeFlow:
                         factor_limit=partial_limit,
                     )
                     print(f"    ✅ Created interstate_factor.csv ({factor_count} rows, {partial_limit} Selected Factors)")
-
                 else:
-                    # No satellite data — drop internal cols and save as-is
+                    # No satellite data — build state impacts before dropping internal cols
+                    impact_input = state_flows[[
+                        '_origin_state',
+                        'state_industry_code',
+                        'level',
+                        'employment_impact',
+                    ]].copy()
+
+                    impact_input['economic_multiplier'] = 1.0
+
+                    state_impacts = self.state_analyzer.calculate_state_industry_impacts(
+                        impact_input
+                    )
+
+                    # No satellite data — drop internal cols and save interstate_factor as-is
                     internal_cols = ['_origin_state', '_destination_state', '_industry1']
                     state_flows_out = state_flows.drop(
                         columns=[c for c in internal_cols if c in state_flows.columns]

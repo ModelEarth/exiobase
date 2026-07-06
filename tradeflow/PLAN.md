@@ -171,8 +171,8 @@ CREATE INDEX idx_istate_region1     ON interstate (region1);
 CREATE INDEX idx_istate_region2     ON interstate (region2);
 
 -- interstate_factor: join and lookup
-CREATE INDEX idx_isf_trade_id       ON interstate_factor (trade_id);
 CREATE INDEX idx_isf_interstate_id  ON interstate_factor (interstate_id);
+CREATE INDEX idx_isf_factor_id      ON interstate_factor (factor_id);
 ```
 
 ---
