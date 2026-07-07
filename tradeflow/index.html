@@ -271,14 +271,8 @@ waitForLocalsiteJs();
     svg.innerHTML = '';
 
     // Mutable layout positions for each table box
-    const layout = {
-      industry:           { x: 260, y: 10  },
-      factor:             { x: 530, y: 10  },
-      trade:              { x: 260, y: 180 },
-      trade_factor:       { x: 530, y: 180 },
-      interstate:         { x: 20,  y: 350 },
-      interstate_factor:  { x: 310, y: 430 }
-    };
+    const layout = {"industry":{"x":22,"y":243},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343}}
+
     try {
       const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
       if (saved) Object.keys(layout).forEach(k => { if (saved[k]) layout[k] = saved[k]; });
