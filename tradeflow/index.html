@@ -39,6 +39,62 @@ loadMarkdown("README.md", "readmeDiv", "_parent");
 loadMarkdown("CLAUDE.md", "claudeDiv", "_parent");
 </script>
 
+<style>
+#insertForm {
+  background: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.dark #insertForm {
+  background: #333;
+  border-color: #555;
+}
+#insertForm label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  gap: 4px;
+}
+#insertForm select, #insertForm input {
+  padding: 5px 8px;
+  font-size: 14px;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  background: #fff;
+}
+.dark #insertForm select, .dark #insertForm input {
+  background: #444;
+  color: #eee;
+  border-color: #666;
+}
+#insertBtn {
+  padding: 6px 18px;
+  font-size: 14px;
+  background: #4a7c59;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#insertBtn:disabled {
+  background: #999;
+  cursor: default;
+}
+#insertResult {
+  margin-top: 10px;
+  font-size: 13px;
+  min-height: 20px;
+}
+#insertResult.error { color: #c00; }
+#insertResult.success { color: #2a6; }
+</style>
+
 </head>
 
 <body>
@@ -47,8 +103,77 @@ loadMarkdown("CLAUDE.md", "claudeDiv", "_parent");
     <a href="https://github.com/ModelEarth/exiobase/tree/main/tradeflow"><img src="../../localsite/img/icon/github/github.png" style="width:42px"></a>
   </div>
   <a href="../../profile/trade">Trade Profiles</a>
+
+  <div id="insertForm">
+    <label>Year
+      <select id="selYear">
+        <option value="2022">2022</option>
+        <option value="2021">2021</option>
+        <option value="2020">2020</option>
+        <option value="2019" selected>2019</option>
+      </select>
+    </label>
+    <label>Country
+      <input id="inpCountry" type="text" value="US" maxlength="2" style="width:60px">
+    </label>
+    <label>Flow Type
+      <select id="selFlow">
+        <option value="exports">exports</option>
+        <option value="imports">imports</option>
+        <option value="domestic">domestic</option>
+      </select>
+    </label>
+    <button id="insertBtn" onclick="insertData()">Insert Data</button>
+    <div id="insertResult"></div>
+  </div>
+
   <div id="readmeDiv"></div>
   <div id="claudeDiv"></div>
 </div>
+
+<script>
+const API_BASE = "http://localhost:5002";
+
+async function insertData() {
+  const year = document.getElementById("selYear").value;
+  const country = document.getElementById("inpCountry").value.trim().toUpperCase();
+  const flow_type = document.getElementById("selFlow").value;
+  const btn = document.getElementById("insertBtn");
+  const result = document.getElementById("insertResult");
+
+  if (!country || country.length !== 2) {
+    result.className = "error";
+    result.textContent = "Enter a valid 2-letter country code.";
+    return;
+  }
+
+  btn.disabled = true;
+  result.className = "";
+  result.textContent = `Inserting ${year}/${country}/${flow_type}...`;
+
+  try {
+    const resp = await fetch(`${API_BASE}/insert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ year: parseInt(year), country, flow_type }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      result.className = "error";
+      result.textContent = "Error: " + (data.error || resp.statusText);
+    } else {
+      const ins = data.rows_inserted;
+      const parts = Object.entries(ins).map(([t, n]) => `${t}: ${n.toLocaleString()}`);
+      result.className = "success";
+      result.textContent = `Done in ${data.elapsed_seconds}s — ${parts.join(", ")}`;
+    }
+  } catch (e) {
+    result.className = "error";
+    result.textContent = "Could not reach API (is api.py running on port 5002?)";
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
 </body>
 </html>
