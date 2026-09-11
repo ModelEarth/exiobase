@@ -92,7 +92,7 @@ for ext_name in extensions_to_use:
     df_final.columns = [
         'product_category',
         'impact_category',
-        'impact_value',
+        'level',
         'year',
         'unit',
         'factor',

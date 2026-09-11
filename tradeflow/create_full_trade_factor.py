@@ -171,13 +171,16 @@ def create_trade_factor_file(config, trade_df, factors_df, file_key):
             coefficient = generate_coefficient(factor_extension, factor_name, industry1)
             
             if coefficient > 0:
-                impact_value = trade_amount * coefficient
-                
+                level = trade_amount * coefficient
+                if factor_extension in ('water', 'air_emissions'):
+                    level = round(level, 3)
+                else:
+                    level = round(level)
+
                 trade_factor_list.append({
                     'trade_id': trade_id,
                     'factor_id': factor_id,
-                    'coefficient': coefficient,
-                    'impact_value': impact_value
+                    'level': level
                 })
     
     # Create DataFrame and save

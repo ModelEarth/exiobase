@@ -44,18 +44,18 @@ def create_trade_impact():
     
     # Group by trade_id and calculate summary statistics
     impact_summary = enhanced_factors.groupby('trade_id').agg({
-        'impact_value': ['sum', 'count'],
+        'level': ['sum', 'count'],
         'factor_id': 'nunique'
     }).round(3)
     
     # Flatten column names
-    impact_summary.columns = ['total_impact_value', 'factor_count', 'unique_factors']
+    impact_summary.columns = ['total_level', 'factor_count', 'unique_factors']
     impact_summary = impact_summary.reset_index()
     
     # Calculate impact by extension (air_emissions, water, etc.)
     print("Calculating impacts by environmental extension...")
     
-    extension_impacts = enhanced_factors.groupby(['trade_id', 'extension'])['impact_value'].sum().unstack(fill_value=0)
+    extension_impacts = enhanced_factors.groupby(['trade_id', 'extension'])['level'].sum().unstack(fill_value=0)
     extension_impacts = extension_impacts.round(3)
     
     # Calculate impact by major factor types
@@ -81,7 +81,7 @@ def create_trade_impact():
         ]
         
         if not matching_factors.empty:
-            type_impact = matching_factors.groupby('trade_id')['impact_value'].sum()
+            type_impact = matching_factors.groupby('trade_id')['level'].sum()
             factor_type_impacts[factor_type] = type_impact
     
     # Handle employment separately with proper unit conversion
@@ -98,12 +98,12 @@ def create_trade_impact():
         sample_people = employment_people_factors.head(3)
         print(f"    Sample people factors before conversion:")
         for _, row in sample_people.iterrows():
-            print(f"      Trade {row['trade_id']}: coefficient={row['coefficient']:.6f}, impact_value={row['impact_value']:.3f}")
-        
+            print(f"      Trade {row['trade_id']}: level={row['level']:.3f}")
+
         # Convert from 1000 people to actual people by multiplying by 1000
         employment_people_converted = employment_people_factors.copy()
-        employment_people_converted['impact_value'] = employment_people_converted['impact_value'] * 1000
-        employment_people_impact = employment_people_converted.groupby('trade_id')['impact_value'].sum()
+        employment_people_converted['level'] = employment_people_converted['level'] * 1000
+        employment_people_impact = employment_people_converted.groupby('trade_id')['level'].sum()
         factor_type_impacts['Employment_people_total'] = employment_people_impact
         
         print(f"    Total employment people impact (top 3 trade_ids): {employment_people_impact.head(3).to_dict()}")
@@ -119,9 +119,9 @@ def create_trade_impact():
         sample_hours = employment_hours_factors.head(3)
         print(f"    Sample hours factors (after coefficient normalization in trade.py):")
         for _, row in sample_hours.iterrows():
-            print(f"      Trade {row['trade_id']}: coefficient={row['coefficient']:.6f}, impact_value={row['impact_value']:.3f}")
+            print(f"      Trade {row['trade_id']}: level={row['level']:.3f}")
         
-        employment_hours_impact = employment_hours_factors.groupby('trade_id')['impact_value'].sum()
+        employment_hours_impact = employment_hours_factors.groupby('trade_id')['level'].sum()
         factor_type_impacts['Employment_hours_total'] = employment_hours_impact
         
         print(f"    Total employment hours impact (top 3 trade_ids): {employment_hours_impact.head(3).to_dict()}")
@@ -156,11 +156,11 @@ def create_trade_impact():
     trade_impact[impact_columns] = trade_impact[impact_columns].fillna(0)
     
     # Calculate impact intensity (total impact per million USD of trade)
-    trade_impact['impact_intensity'] = (trade_impact['total_impact_value'] / trade_impact['amount']).round(6)
+    trade_impact['impact_intensity'] = (trade_impact['total_level'] / trade_impact['amount']).round(6)
     trade_impact['impact_intensity'] = trade_impact['impact_intensity'].replace([np.inf, -np.inf], 0)
     
     # Sort by total impact value descending
-    trade_impact = trade_impact.sort_values('total_impact_value', ascending=False)
+    trade_impact = trade_impact.sort_values('total_level', ascending=False)
     
     # Save to CSV
     output_file = get_file_path(config, 'trade_impact')
@@ -173,10 +173,10 @@ def create_trade_impact():
     print(f"Total trade flows: {len(trade_impact)}")
     print(f"Trade flows with environmental data: {len(trade_impact[trade_impact['factor_count'] > 0])}")
     print(f"Average factors per trade: {trade_impact['factor_count'].mean():.1f}")
-    print(f"Total environmental impact value: {trade_impact['total_impact_value'].sum():,.0f}")
+    print(f"Total environmental impact value: {trade_impact['total_level'].sum():,.0f}")
     
     print(f"\nTop 10 trade flows by total environmental impact:")
-    top_impacts = trade_impact.head(10)[['trade_id', 'region1', 'industry1', 'amount', 'total_impact_value', 'factor_count']]
+    top_impacts = trade_impact.head(10)[['trade_id', 'region1', 'industry1', 'amount', 'total_level', 'factor_count']]
     print(top_impacts.to_string(index=False))
     
     print(f"\nContext breakdown (sum of all impacts):")

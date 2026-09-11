@@ -9,13 +9,29 @@ from pathlib import Path
 
 def load_config():
     """
-    Load configuration from config.yaml
+    Load configuration from config.yaml.
+    When run as a subprocess from main.py, EXIOBASE_TRADEFLOW and EXIOBASE_COUNTRY
+    environment variables override the config file values, so config.yaml mutations
+    from the parent process cannot cause stale values inside subprocesses.
     """
     config_path = Path(__file__).parent / 'config.yaml'
-    
+
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
+
+    # Environment variable overrides (set by main.py for each subprocess invocation)
+    tradeflow_env = os.environ.get('EXIOBASE_TRADEFLOW')
+    country_env = os.environ.get('EXIOBASE_COUNTRY')
+
+    if tradeflow_env:
+        config['TRADEFLOW'] = tradeflow_env
+
+    if country_env:
+        if isinstance(config['COUNTRY'], dict):
+            config['COUNTRY']['current'] = country_env
+        else:
+            config['COUNTRY'] = {'list': str(config['COUNTRY']), 'current': country_env}
+
     return config
 
 def update_config(updates):

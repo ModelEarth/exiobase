@@ -2,6 +2,7 @@ pandas>=1.5.0
 numpy>=1.21.0
 pymrio>=0.5.0
 PyYAML>=6.0
+python-dotenv>=1.0.0
 pathlib2>=2.3.7; python_version < '3.4'
 SQLAlchemy>=2.0.0
 psycopg2-binary>=2.9.0      # for postgres

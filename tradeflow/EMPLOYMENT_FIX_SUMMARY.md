@@ -25,10 +25,10 @@ This mixed different units in a single column.
 2. **Applied proper unit conversion**:
    ```python
    # Employment people (convert from 1000 p to actual people)
-   employment_people_converted['impact_value'] = employment_people_converted['impact_value'] * 1000
+   employment_people_converted['level'] = employment_people_converted['level'] * 1000
    
    # Employment hours (keep as M.hr)
-   employment_hours_impact = employment_hours_factors.groupby('trade_id')['impact_value'].sum()
+   employment_hours_impact = employment_hours_factors.groupby('trade_id')['level'].sum()
    ```
 
 ## Results

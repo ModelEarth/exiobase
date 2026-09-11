@@ -1,4 +1,6 @@
-# COUNTRY.list "all" = run all, "default" = run only incomplete ones within these 12: AU, BR, CA, CN, DE, FR, GB, IN, IT, JP, KR, US
+NOTES:
+  1: COUNTRY.list "default" = run only incomplete ones within these 12 AU, BR, CA, CN, DE, FR, GB, IN, IT, JP, KR, US
+  2: COUNTRY.list "all" = run all (could take hours)
 TRADEFLOW: domestic,imports,exports
 YEAR: 2019
 COUNTRY:
@@ -15,7 +17,7 @@ NODES:
     output_path: ../../../trade-data/year/[year]/
     output_info: Exiobase trade tables
     folder_size: unknown
-    dependencies: "{detected_dependencies}"
+    dependencies: '{detected_dependencies}'
     data_sources: Exiobase MRIO
     target_repo: trade-data
   us_bea:
@@ -30,9 +32,26 @@ NODES:
     output_path: ../../../trade-data/year/[year]/US/
     output_info: US BEA enhanced trade tables
     folder_size: unknown
-    dependencies: "{detected_dependencies}"
+    dependencies: '{detected_dependencies}'
     api_keys_required: BEA_API_KEY
     data_sources: Exiobase MRIO,US BEA API,FEDEFL
+    target_repo: trade-data
+  india:
+    source_python: india/main.py
+    node_id: india
+    order: 46
+    parent_node: exiobase
+    name: India State Allocation
+    description: Disaggregates India national statistics to states/UTs and maps Indian GSVA
+      activity text and HS products to Exiobase industry_id codes shared with US trade-data
+      outputs.
+    link: exiobase/tradeflow/india
+    python_cmds: python india/main.py
+    output_path: ../../../trade-data/year/[year]/IN/domestic/
+    output_info: India state matrices; india_us_exiobase crosswalk; aligns industry_id with US MRIO
+    folder_size: unknown
+    dependencies: '{detected_dependencies}'
+    data_sources: India MOSPI GSDP/GSVA, TradeStat HS, India SUT, HS_EXIOBASE_mapping
     target_repo: trade-data
 FOLDERS:
   base: ../../trade-data/year/{year}
@@ -45,6 +64,8 @@ FILES:
   industryflow: trade.csv
   trade_factor: trade_factor.csv
   trade_factor_domestic: trade_factor_lg.csv
+  interstate_factor: interstate_factor.csv
+  interstate_factor_lg: interstate_factor_lg.csv
   trade_impact: trade_impact.csv
   trade_resource: trade_resource.csv
   trade_material: trade_material.csv
@@ -56,3 +77,5 @@ PROCESSING:
   partial_factor_limit: 120
   use_partial_factors_domestic: false
   partial_factor_limit_domestic: 2000
+  partial_factor_limit_interstate: 5
+  use_partial_factors_interstate: true

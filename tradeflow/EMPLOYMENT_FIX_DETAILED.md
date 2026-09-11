@@ -57,7 +57,7 @@ Added detailed logging to monitor the unit conversion process:
 # Debug: Show sample coefficients and impact values before/after conversion
 print(f"Sample people factors before conversion:")
 for _, row in sample_people.iterrows():
-    print(f"Trade {row['trade_id']}: coefficient={row['coefficient']:.6f}, impact_value={row['impact_value']:.3f}")
+    print(f"Trade {row['trade_id']}: coefficient={row['coefficient']:.6f}, level={row['level']:.3f}")
 ```
 
 ### 3. Preserved Display Conversion Logic
@@ -83,8 +83,8 @@ The existing multiplication by 1000 for employment people in `trade_impact.py` i
    - No more 1000x unit mixing in the coefficient values
 
 4. **trade_impact.py Processing**:
-   - Employment people: multiply impact_value by 1000 (convert 1000p → people for display)
-   - Employment hours: keep impact_value as-is (already normalized)
+   - Employment people: multiply level by 1000 (convert 1000p → people for display)
+   - Employment hours: keep level as-is (already normalized)
 
 ### Expected Results
 

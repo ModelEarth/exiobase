@@ -6,7 +6,7 @@ Outputs trade.csv with columns: year, region1, region2, industry1, industry2, am
 
 Default (Recommended):
 python trade.py
-Creates small trade_factor.csv (~50 factors, manageable size)
+Creates small trade_factor.csv (50 to 120 factors, manageable size)
 
 Large File (Not Recommended):
 python trade.py -lag
@@ -23,7 +23,7 @@ Creates 4 files
   amount
 
   3. Trade Factors (your focus):
-  - trade_factor.csv (default, small ~50 factors)
+  - trade_factor.csv (default, small 50 to 120 factors)
   - trade_factor_lg.csv (with -lag flag, large ~721 factors)
 
 """
@@ -75,7 +75,10 @@ class ExiobaseTradeFlow:
         # Set up paths for Exiobase data storage
         self.model_path = Path(__file__).parent / 'exiobase_data'
         self.model_path.mkdir(exist_ok=True)
-        
+
+        # Ensure the Exiobase zip is downloaded before sector mapping needs it
+        self._ensure_exiobase_file()
+
         # Load or create sector mapping
         self.sector_mapping = self.load_sector_mapping()
         
@@ -87,7 +90,7 @@ class ExiobaseTradeFlow:
         Load the sector mapping from industry.csv or create it if it doesn't exist
         """
         industries_file = get_reference_file_path(self.config, 'industries')
-        
+
         if Path(industries_file).exists():
             print("Loading existing sector mapping from industry.csv")
             mapping_df = pd.read_csv(industries_file)
@@ -98,6 +101,9 @@ class ExiobaseTradeFlow:
             # Run the sector mapping creation
             from create_sector_mapping import create_sector_mapping
             mapping_df = create_sector_mapping()
+            if mapping_df is None:
+                print("Warning: Could not create sector mapping (Exiobase zip unavailable). Using empty mapping.")
+                return {}
             return dict(zip(mapping_df['name'], mapping_df['industry_id']))
 
     def create_factors_export(self):
@@ -121,6 +127,8 @@ class ExiobaseTradeFlow:
         Apply filtering to create smaller trade_factor.csv using selected factors
         """
         partial_limit = self.config['PROCESSING'].get('partial_factor_limit', 50)
+        F_stacked = F_stacked.copy()
+        F_stacked['_abs_coefficient'] = F_stacked['coefficient'].abs()
         
         # Define priority factors for each extension
         priority_factors = {
@@ -141,14 +149,14 @@ class ExiobaseTradeFlow:
             
             # If we still have too many, select top ones by coefficient magnitude
             if len(priority_data) > partial_limit:
-                priority_data = priority_data.nlargest(partial_limit, 'coefficient')
+                priority_data = priority_data.nlargest(partial_limit, '_abs_coefficient')
             
             # If we have fewer than limit, add other significant factors
             remaining_limit = partial_limit - len(priority_data)
             if remaining_limit > 0:
                 other_data = F_stacked[~priority_mask].copy()
                 if len(other_data) > 0:
-                    other_significant = other_data.nlargest(remaining_limit, 'coefficient')
+                    other_significant = other_data.nlargest(remaining_limit, '_abs_coefficient')
                     F_stacked = pd.concat([priority_data, other_significant], ignore_index=True)
                 else:
                     F_stacked = priority_data
@@ -156,8 +164,9 @@ class ExiobaseTradeFlow:
                 F_stacked = priority_data
         else:
             # If no priority factors defined, select by coefficient magnitude
-            F_stacked = F_stacked.nlargest(partial_limit, 'coefficient')
+            F_stacked = F_stacked.nlargest(partial_limit, '_abs_coefficient')
         
+        F_stacked = F_stacked.drop(columns=['_abs_coefficient'], errors='ignore')
         print(f"    Selected {len(F_stacked)} factors from {ext_name} (partial factors mode)")
         return F_stacked
 
@@ -172,10 +181,9 @@ class ExiobaseTradeFlow:
             factors_file = get_reference_file_path(self.config, 'factors')
             factors_df = pd.read_csv(factors_file)
             
-            # Create a mapping from factor names to factor_ids
-            # Extract factor names from stressor column (format: "CO2 - combustion - air")
-            factors_df['name'] = factors_df['stressor'].str.split(' - ').str[0]
-            factor_mapping = dict(zip(factors_df['name'], factors_df['factor_id']))
+            # Create an exact mapping from Exiobase stressor names to factor_ids.
+            # Prefix-only names like "CO2" are ambiguous across multiple factors.
+            factor_mapping = dict(zip(factors_df['stressor'], factors_df['factor_id']))
             
             # Add robust mapping for common formatting variations
             robust_mapping = factor_mapping.copy()
@@ -202,40 +210,40 @@ class ExiobaseTradeFlow:
                     print(f"Processing {ext_name} factors for trade flows...")
                     ext = getattr(exio_model, ext_name)
                     
-                    if hasattr(ext, 'F'):
-                        F_matrix = ext.F
+                    if hasattr(ext, 'S'):
+                        S_matrix = ext.S
                         
-                        # Convert F matrix to a lookup format
-                        # F matrix: rows = factors, columns = (region, sector)
-                        F_stacked = F_matrix.stack(level=['region', 'sector'], future_stack=True).reset_index()
+                        # Convert S matrix to a lookup format.
+                        # S matrix values are physical intensity per unit output.
+                        F_stacked = S_matrix.stack(level=['region', 'sector'], future_stack=True).reset_index()
                         F_stacked.columns = ['stressor', 'region', 'sector', 'coefficient']
                         
                         # Filter for non-zero coefficients only and sample for performance
                         F_stacked = F_stacked[F_stacked['coefficient'] != 0].copy()
                         
                         # Keep ALL coefficients for comprehensive analysis
-                        print(f"  Found {len(F_stacked)} non-zero {ext_name} coefficients")
+                        print(f"  Found {len(F_stacked)} non-zero {ext_name} intensity coefficients")
                         
                         # Map sectors to industry IDs
                         F_stacked['industry_id'] = F_stacked['sector'].map(self.sector_mapping)
                         F_stacked = F_stacked.dropna(subset=['industry_id'])
                         
-                        # Extract flowable name for mapping
-                        F_stacked['flowable'] = F_stacked['stressor'].apply(lambda x: x.split(' - ')[0] if ' - ' in x else x)
-                        F_stacked['factor_id'] = F_stacked['flowable'].map(factor_mapping)
+                        # Keep exact stressor names for factor_id mapping. The
+                        # flowable field is used only for priority filtering.
+                        F_stacked['flowable'] = F_stacked['stressor'].astype(str)
+                        F_stacked['factor_id'] = F_stacked['stressor'].map(factor_mapping)
                         F_stacked = F_stacked.dropna(subset=['factor_id'])
                         
-                        # EMPLOYMENT UNIT CONVERSION FIX
-                        # Handle employment factors with proper unit normalization
+                        # Employment S coefficients are already in their factor
+                        # units per unit output. No additional unit scaling is
+                        # applied here.
                         if ext_name == 'employment':
-                            print(f"  Applying employment unit conversion for {len(F_stacked)} employment factors")
+                            print(f"  Using employment intensity coefficients for {len(F_stacked)} employment factors")
                             
                             # Employment people: stressor contains "Employment people:" with "1000 p" units
-                            # These coefficients are already in "per 1000 people" so they're correctly scaled
                             employment_people_mask = F_stacked['stressor'].str.contains('Employment people:', case=False, na=False)
                             
-                            # Employment hours: stressor contains "Employment hours:" with "M.hr" units  
-                            # These coefficients are in "million hours per unit" - need to normalize to same scale as people
+                            # Employment hours: stressor contains "Employment hours:" with "M.hr" units
                             employment_hours_mask = F_stacked['stressor'].str.contains('Employment hours:', case=False, na=False)
                             
                             # For debugging - show what employment factors we're processing
@@ -246,18 +254,6 @@ class ExiobaseTradeFlow:
                             if employment_hours_mask.any():
                                 hours_count = employment_hours_mask.sum()
                                 print(f"    Found {hours_count} employment hours factors (M.hr units)")
-                                
-                                # Convert employment hours coefficients to be comparable with employment people
-                                # Scale down hours by factor of 1000 to normalize units (M.hr -> 1000.hr equivalent)
-                                # This ensures that when trade_impact.py applies conversions, the final values are realistic
-                                original_hours_coeff = F_stacked.loc[employment_hours_mask, 'coefficient'].copy()
-                                F_stacked.loc[employment_hours_mask, 'coefficient'] *= 0.001  # Scale down by 1000
-                                
-                                # Debug output for coefficient scaling
-                                if len(original_hours_coeff) > 0:
-                                    print(f"    Scaled employment hours coefficients: {original_hours_coeff.mean():.6f} → {F_stacked.loc[employment_hours_mask, 'coefficient'].mean():.6f}")
-                            
-                            # Note: Employment people factors are kept as-is since they're already in appropriate 1000p units
                         
                         # Apply partial factors filtering if not using large factors
                         if not self.use_large_factors and self.config['PROCESSING'].get('use_partial_factors', True):
@@ -305,16 +301,22 @@ class ExiobaseTradeFlow:
                             trade_factor_merge = pd.DataFrame()
                         
                         if not trade_factor_merge.empty:
-                            # Calculate factor impacts
-                            trade_factor_merge['impact_value'] = trade_factor_merge['amount'] * trade_factor_merge['coefficient']
-                            
+                            # Calculate factor level (physical impact quantity)
+                            trade_factor_merge['level'] = trade_factor_merge['amount'] * trade_factor_merge['coefficient']
+
+                            # Round: 3 decimals for water/air_emissions (small physical quantities), 0 for others
+                            if ext_name in ('water', 'air_emissions'):
+                                trade_factor_merge['level'] = trade_factor_merge['level'].round(3)
+                            else:
+                                trade_factor_merge['level'] = trade_factor_merge['level'].round(0).astype(int)
+
                             # Filter for meaningful impacts (keep all meaningful data)
                             initial_count = len(trade_factor_merge)
-                            trade_factor_merge = trade_factor_merge[abs(trade_factor_merge['impact_value']) > 0.001]
+                            trade_factor_merge = trade_factor_merge[abs(trade_factor_merge['level']) > 0.001]
                             print(f"  Filtered {initial_count} -> {len(trade_factor_merge)} meaningful impacts (>0.001)")
-                            
+
                             # Keep only needed columns and verify factor_id integrity
-                            trade_factor_subset = trade_factor_merge[['trade_id', 'factor_id', 'coefficient', 'impact_value']]
+                            trade_factor_subset = trade_factor_merge[['trade_id', 'factor_id', 'level']]
                             
                             # Check for any remaining NaN values in factor_id
                             nan_count = trade_factor_subset['factor_id'].isna().sum()
@@ -356,7 +358,7 @@ class ExiobaseTradeFlow:
                 output_file = get_file_path(self.config, 'trade_factor')
                 if output_file.endswith('_lg.csv'):
                     output_file = output_file.replace('_lg.csv', '.csv')
-                pd.DataFrame(columns=['trade_id', 'factor_id', 'coefficient', 'impact_value']).to_csv(output_file, index=False)
+                pd.DataFrame(columns=['trade_id', 'factor_id', 'level']).to_csv(output_file, index=False)
                 
         except Exception as e:
             print(f"Error creating trade_factor.csv: {e}")
@@ -386,13 +388,10 @@ class ExiobaseTradeFlow:
                     else:
                         coefficient = np.random.uniform(0.001, 0.05)
                     
-                    impact_value = trade_row['amount'] * coefficient
-                    
                     sample_factors.append({
                         'trade_id': trade_row['trade_id'],
                         'factor_id': factor_id,
-                        'coefficient': coefficient,
-                        'impact_value': impact_value
+                        'level': trade_row['amount'] * coefficient
                     })
             
             trade_factor_df = pd.DataFrame(sample_factors)
@@ -403,57 +402,123 @@ class ExiobaseTradeFlow:
         except Exception as e:
             print(f"Error creating fallback trade_factor.csv: {e}")
 
-    def download_and_process_exiobase(self):
+    def _download_direct(self, year):
         """
-        Download and process Exiobase data using pymrio library
+        Direct download from Zenodo using the current API URL format.
+        pymrio's built-in downloader uses a regex that no longer matches Zenodo's URLs
+        (Zenodo changed from /records/ID/files/NAME.zip to
+        /api/records/ID/files/NAME.zip/content), so this method bypasses it.
         """
-        print(f"Downloading Exiobase data for {self.year}...")
-        
-        # Check if Exiobase data already exists
+        import requests
+
+        filename = f"IOT_{year}_{self.model_type}.zip"
+        dest = self.model_path / filename
+
+        # Resolve the DOI to get the current Zenodo record ID
+        doi_url = "https://doi.org/10.5281/zenodo.3583070"
+        print(f"Resolving Zenodo DOI to find current record ID...")
+        r = requests.get(doi_url, allow_redirects=True, timeout=30)
+        record_id = r.url.rstrip('/').split('/')[-1]
+        if not record_id.isdigit():
+            raise RuntimeError(f"Could not extract Zenodo record ID from URL: {r.url}")
+
+        download_url = f"https://zenodo.org/api/records/{record_id}/files/{filename}/content"
+        print(f"Downloading {filename} from Zenodo record {record_id}...")
+        print(f"URL: {download_url}")
+        print("(This may take several minutes - file is ~4GB)")
+
+        with requests.get(download_url, stream=True, timeout=3600) as r:
+            r.raise_for_status()
+            total = int(r.headers.get('content-length', 0))
+            downloaded = 0
+            with open(dest, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=1024 * 1024):  # 1 MB chunks
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        pct = downloaded / total * 100
+                        print(f"\r  Progress: {pct:.1f}% ({downloaded/1e9:.2f}/{total/1e9:.2f} GB)",
+                              end='', flush=True)
+        print()
+        print(f"Successfully downloaded {filename}")
+        return dest
+
+    def _ensure_exiobase_file(self):
+        """
+        Ensure the Exiobase zip is present, downloading it if needed.
+        Sets self.year to the fallback year if the requested year is unavailable.
+        Returns the Path to the zip, or None if only simulated fallback data can be used.
+        """
         exio_file = self.model_path / f'IOT_{self.year}_{self.model_type}.zip'
         if exio_file.exists():
             print(f"Found existing Exiobase file: {exio_file}")
-        else:
-            # Download Exiobase data for the specified year
-            try:
-                print(f"Downloading Exiobase data for {self.year}... (this may take several minutes)")
-                pymrio.download_exiobase3(
-                    storage_folder=self.model_path,
-                    system=self.model_type,
-                    years=[self.year]
+            return exio_file
+
+        # Try pymrio downloader first, then fall back to direct download.
+        # pymrio's regex (expecting /records/ID/files/NAME.zip) no longer matches
+        # Zenodo's current URL format (/api/records/ID/files/NAME.zip/content), so
+        # it silently succeeds without downloading anything.
+        try:
+            print(f"Downloading Exiobase {self.year} data via pymrio...")
+            pymrio.download_exiobase3(
+                storage_folder=self.model_path,
+                system=self.model_type,
+                years=[self.year]
+            )
+            if not exio_file.exists():
+                raise RuntimeError(
+                    f"pymrio.download_exiobase3 completed without error but did not create "
+                    f"{exio_file.name}. pymrio's URL regex no longer matches Zenodo's current "
+                    f"API format (/api/records/ID/files/NAME.zip/content). Trying direct download."
                 )
-                print(f"Successfully downloaded Exiobase {self.year} data")
-            except Exception as e:
-                print(f"Download failed for {self.year}: {e}")
-                # Only fallback to a prior year that doesn't yet have downloaded data
-                # If the year prior to the missing year already has a download, then exit the process
-                fallback_year = self.year - 1
-                fallback_file = self.model_path / f'IOT_{fallback_year}_{self.model_type}.zip'
-                
-                if fallback_file.exists():
-                    print(f"Prior year {fallback_year} already has downloaded data, preventing rerun. Exiting process.")
-                    print("Please manually download the requested year or use an available year.")
-                    exit(1)
-                else:
-                    print(f"Trying to download prior year {fallback_year}...")
-                    try:
-                        pymrio.download_exiobase3(
-                            storage_folder=self.model_path,
-                            system=self.model_type,
-                            years=[fallback_year]
-                        )
-                        print(f"Successfully downloaded Exiobase {fallback_year} data")
-                        self.year = fallback_year
-                        exio_file = fallback_file
-                    except Exception as fallback_e:
-                        print(f"Fallback download failed for {fallback_year}: {fallback_e}")
-                        print("Using fallback method with simulated data...")
-                        return self.load_fallback_data()
-        
+            print(f"Successfully downloaded Exiobase {self.year} data")
+            return exio_file
+        except Exception as e:
+            print(f"pymrio download issue: {e}")
+
+        # Direct download using current Zenodo API URL format
+        try:
+            self._download_direct(self.year)
+            return exio_file
+        except Exception as direct_e:
+            print(f"Direct download failed for {self.year}: {direct_e}")
+
+        # Only fallback to a prior year that doesn't yet have downloaded data.
+        # If the prior year already has a download, exit to prevent accidental reuse.
+        fallback_year = self.year - 1
+        fallback_file = self.model_path / f'IOT_{fallback_year}_{self.model_type}.zip'
+
+        if fallback_file.exists():
+            print(f"Prior year {fallback_year} already has downloaded data, preventing rerun. Exiting process.")
+            print("Please manually download the requested year or use an available year.")
+            exit(1)
+
+        print(f"Trying to download prior year {fallback_year}...")
+        try:
+            self._download_direct(fallback_year)
+            print(f"Successfully downloaded Exiobase {fallback_year} data")
+            self.year = fallback_year
+            return fallback_file
+        except Exception as fallback_e:
+            print(f"Fallback download failed for {fallback_year}: {fallback_e}")
+            print("Will use simulated fallback data.")
+            return None
+
+    def download_and_process_exiobase(self):
+        """
+        Download (if needed) and parse Exiobase data using pymrio library.
+        """
+        print(f"Loading Exiobase data for {self.year}...")
+
+        exio_file = self._ensure_exiobase_file()
+
+        if exio_file is None:
+            return self.load_fallback_data()
+
         # Parse the downloaded Exiobase data
         try:
             print(f"Parsing Exiobase file: {exio_file}")
-            exio_model = pymrio.parse_exiobase3(exio_file)
+            exio_model = pymrio.parse_exiobase3(exio_file).calc_all()
             return exio_model
         except Exception as e:
             print(f"Parsing failed: {e}")
@@ -537,6 +602,14 @@ class ExiobaseTradeFlow:
             'to_region': 'region2',
             'flow': 'amount'
         })
+
+        # Keep the historical 2dp trade.csv format, but do not carry rows that
+        # would be written as 0.00 into trade_factor.csv or BEA interstate data.
+        rounded_zero_rows = trade_data['amount'].round(2) <= 0
+        if rounded_zero_rows.any():
+            removed_count = int(rounded_zero_rows.sum())
+            trade_data = trade_data[~rounded_zero_rows].copy()
+            print(f"Removed {removed_count} flows that round to 0.00 at 2 decimals")
         
         # Add year column
         trade_data['year'] = self.year

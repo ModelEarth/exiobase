@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>Localsite</title>
+<link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link type="text/css" rel="stylesheet" href="../../../localsite/css/base.css" id="/localsite/css/base.css" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.href='https://model.earth/localsite/css/base.css';}">
+<script type="text/javascript" src="../../../localsite/js/localsite.js?showheader=true&showsearch=true" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='https://model.earth/localsite/js/localsite.js?showheader=true&showsearch=true';}"></script>
+
+<script>
+function loadTradeflowMarkdown() {
+  loadMarkdown("README.md", "readmeDiv", "_parent");
+}
+const tradeflowMarkdownWaitStart = Date.now();
+
+// An external localsite.js link is provides above.
+function waitForLocalsiteJs() { // Detects when loadMarkdown is available.
+  if (typeof loadMarkdown === 'function') {
+    loadTradeflowMarkdown();
+  } else if (Date.now() - tradeflowMarkdownWaitStart < 10000) {
+    requestAnimationFrame(waitForLocalsiteJs);
+  } else {
+    console.error('localsite.js did not load within 10 seconds.'); // Give up after 10 seconds
+  }
+}
+waitForLocalsiteJs();
+</script>
+</head>
+
+<body>
+<div class="content contentpadding">
+  <div id="readmeDiv"></div>
+</div>
+</body>
+</html>

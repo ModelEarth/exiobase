@@ -9,20 +9,25 @@ Allocates national trade flows and economic data to Indian states/UTs using:
 - TradeStat-Eidb Export and Import data (HS codes)
 - GSDP_Current_2011-12_State_wise for scaling
 
-Usage:
-    python india-state-allocation.py
-    python india-state-allocation.py --data-dir ../India_data
-    python india-state-allocation.py --year 2019
+Usage (from exiobase/tradeflow/):
+    python india/main.py
+    python india/main.py --data-dir ../India_data
+    python india/main.py --year 2019
 """
 
+import sys
 import pandas as pd
 import numpy as np
 import argparse
 import os
+import shutil
 from pathlib import Path
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
+
+# Allow imports from parent tradeflow directory (config_loader, etc.)
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Try to import openpyxl for Excel support
 try:
@@ -31,7 +36,7 @@ except ImportError:
     print("Warning: openpyxl not installed. Excel file support may be limited.")
     print("Install with: pip install openpyxl")
 
-from config_loader import load_config, get_file_path, get_reference_file_path
+from config_loader import load_config, get_reference_file_path
 
 class IndiaStateAllocator:
     def __init__(self, data_dir=None, year=None):
@@ -48,8 +53,8 @@ class IndiaStateAllocator:
         if data_dir:
             self.data_dir = Path(data_dir)
         else:
-            # Default to India_data folder in project root
-            self.data_dir = Path(__file__).parent.parent / 'India_data'
+            # Default to India_data folder in exiobase/ root
+            self.data_dir = Path(__file__).parent.parent.parent / 'India_data'
         
         if not self.data_dir.exists():
             raise FileNotFoundError(
@@ -68,6 +73,8 @@ class IndiaStateAllocator:
         self.import_data = None
         self.hs_exiobase_mapping = None
         self.industry_mapping = None
+        self.india_us_crosswalk = None  # Indian GSVA text -> Exiobase industry_id (same IDs as US trade-data)
+        self._industry_name_and_id_lookup = {}  # name or id -> industry_id
         
         # Output matrices
         self.state_sector_output = None  # State × Sector output matrix
@@ -80,6 +87,8 @@ class IndiaStateAllocator:
         
         # Load industry mapping from reference files
         self._load_industry_mapping()
+        self._load_india_us_crosswalk()
+        self._build_industry_id_lookup()
     
     def _scan_available_files(self):
         """Scan the data directory and catalog available files"""
@@ -154,7 +163,71 @@ class IndiaStateAllocator:
         except Exception as e:
             print(f"Warning: Could not load industry mapping: {e}")
             self.industry_mapping = None
-    
+
+    def _build_industry_id_lookup(self):
+        """Map Exiobase industry name and 5-char industry_id -> industry_id (US and IN share this taxonomy in trade-data)."""
+        self._industry_name_and_id_lookup = {}
+        if self.industry_mapping is None:
+            return
+        for _, row in self.industry_mapping.iterrows():
+            name = str(row["name"]).strip()
+            iid = str(row["industry_id"]).strip()
+            self._industry_name_and_id_lookup[name.lower()] = iid
+            self._industry_name_and_id_lookup[iid.lower()] = iid
+
+    def _load_india_us_crosswalk(self):
+        """
+        Load India GSVA / national-accounts activity keywords -> Exiobase industry_id.
+        The same industry_id values appear in US Exiobase-derived trade outputs, enabling cross-country IO alignment.
+        """
+        path = Path(__file__).resolve().parent / "india_us_exiobase_crosswalk.csv"
+        if not path.exists():
+            print(f"Warning: India–US Exiobase crosswalk not found at {path}")
+            self.india_us_crosswalk = pd.DataFrame(
+                columns=["india_gsva_keyword", "industry_id", "exiobase_industry_name", "alignment_note"]
+            )
+            self._crosswalk_sorted_keywords = []
+            return
+        self.india_us_crosswalk = pd.read_csv(path)
+        # Longest keywords first so e.g. "public administration" wins over "public"
+        kw = self.india_us_crosswalk["india_gsva_keyword"].astype(str).str.strip()
+        order = kw.str.len().sort_values(ascending=False).index
+        self.india_us_crosswalk = self.india_us_crosswalk.loc[order].reset_index(drop=True)
+        self._crosswalk_sorted_keywords = [
+            (str(r.india_gsva_keyword).strip().lower(), str(r.industry_id).strip(), str(r.exiobase_industry_name).strip())
+            for r in self.india_us_crosswalk.itertuples(index=False)
+        ]
+        print(f"Loaded India→Exiobase crosswalk: {len(self.india_us_crosswalk)} keyword rows (shared industry_id with US MRIO outputs)")
+
+    def _match_india_sector_to_exiobase(self, sector_label):
+        """Return (industry_id, exiobase_industry_name) for an Indian sector label."""
+        if sector_label is None or (isinstance(sector_label, float) and np.isnan(sector_label)):
+            return "-1", "Unmapped"
+        s = str(sector_label).strip().lower()
+        if not s:
+            return "-1", "Unmapped"
+        for kw, iid, ename in self._crosswalk_sorted_keywords:
+            if kw and kw in s:
+                return iid, ename
+        if self._industry_name_and_id_lookup:
+            if s in self._industry_name_and_id_lookup:
+                iid = self._industry_name_and_id_lookup[s]
+                sub = self.industry_mapping[self.industry_mapping["industry_id"] == iid]
+                ename = sub["name"].iloc[0] if len(sub) else iid
+                return iid, str(ename)
+        return "-1", "Unmapped"
+
+    def _resolve_industry_id_from_exiobase_label(self, label):
+        """Map HS / pivot product label (name or compact Exiobase code) to 5-char industry_id."""
+        if label is None or (isinstance(label, float) and pd.isna(label)):
+            return "-1"
+        key = str(label).strip().lower()
+        if not key or key == "unmapped":
+            return "-1"
+        if key in self._industry_name_and_id_lookup:
+            return self._industry_name_and_id_lookup[key]
+        return "-1"
+
     def load_india_data(self):
         """Load all India data files"""
         print("\n" + "="*60)
@@ -634,6 +707,7 @@ class IndiaStateAllocator:
         if mapping_file.exists():
             self.hs_exiobase_mapping = pd.read_csv(mapping_file)
             print(f"  ✅ Loaded mapping: {len(self.hs_exiobase_mapping)} entries")
+            self._attach_industry_ids_to_hs_mapping()
         else:
             print(f"  ⚠️ HS-EXIOBASE mapping not found, will create basic mapping")
             self.hs_exiobase_mapping = self._create_basic_hs_mapping()
@@ -641,7 +715,23 @@ class IndiaStateAllocator:
             mapping_file.parent.mkdir(parents=True, exist_ok=True)
             self.hs_exiobase_mapping.to_csv(mapping_file, index=False)
             print(f"  ✅ Created and saved basic mapping: {mapping_file}")
-    
+            self._attach_industry_ids_to_hs_mapping()
+
+    def _attach_industry_ids_to_hs_mapping(self):
+        """Add industry_id for each HS row using Exiobase product/sector labels (same codes as US-side trade-data)."""
+        if self.hs_exiobase_mapping is None or not len(self.hs_exiobase_mapping):
+            return
+
+        def resolve_row(row):
+            for col in ("exiobase_product", "exiobase_sector"):
+                if col in row.index and pd.notna(row[col]):
+                    iid = self._resolve_industry_id_from_exiobase_label(row[col])
+                    if iid != "-1":
+                        return iid
+            return "-1"
+
+        self.hs_exiobase_mapping["industry_id"] = self.hs_exiobase_mapping.apply(resolve_row, axis=1)
+
     def _create_basic_hs_mapping(self):
         """Create a basic HS to EXIOBASE mapping based on commodity categories"""
         # This is a simplified mapping - should be enhanced with actual concordance
@@ -787,6 +877,9 @@ class IndiaStateAllocator:
                         })
         
         self.state_sector_output = pd.DataFrame(state_sector_list)
+        matched = self.state_sector_output["sector"].apply(self._match_india_sector_to_exiobase)
+        self.state_sector_output["industry_id"] = matched.apply(lambda t: t[0])
+        self.state_sector_output["exiobase_industry_name"] = matched.apply(lambda t: t[1])
         
         # Validate: state totals should match GSDP
         validation = self.state_sector_output.groupby('state')['output'].sum()
@@ -856,23 +949,23 @@ class IndiaStateAllocator:
         for product in products:
             national_export_value = national_exports[product]
             
-            # Find which sector this product belongs to
-            sector = product_sector_map.get(product, None)
-            
-            if sector is None:
-                # If no sector mapping, allocate based on total GSDP
+            # industry_id aligns Indian state outputs with US/Exiobase trade-data industry codes
+            industry_id = product_sector_map.get(product, None)
+            if not industry_id or industry_id == "-1":
+                industry_id = self._resolve_industry_id_from_exiobase_label(product)
+            use_industry_slice = industry_id and industry_id != "-1"
+
+            if not use_industry_slice:
                 state_shares = self.state_sector_output.groupby('state')['output'].sum()
                 state_shares = state_shares / state_shares.sum()
             else:
-                # Allocate based on sector output
                 sector_outputs = self.state_sector_output[
-                    self.state_sector_output['sector'] == sector
+                    self.state_sector_output['industry_id'] == industry_id
                 ].groupby('state')['output'].sum()
                 
                 if sector_outputs.sum() > 0:
                     state_shares = sector_outputs / sector_outputs.sum()
                 else:
-                    # Fallback to total GSDP
                     state_shares = self.state_sector_output.groupby('state')['output'].sum()
                     state_shares = state_shares / state_shares.sum()
             
@@ -892,9 +985,10 @@ class IndiaStateAllocator:
                 state_export_list.append({
                     'state': state,
                     'exiobase_product': product,
+                    'industry_id': industry_id if use_industry_slice else self._resolve_industry_id_from_exiobase_label(product),
                     'export_value': state_export_value,
                     'hs_code': hs_code_value,
-                    'allocation_method': 'sector_output' if sector else 'gsdp_proportion'
+                    'allocation_method': 'industry_id_output' if use_industry_slice else 'gsdp_proportion'
                 })
         
         self.state_product_export = pd.DataFrame(state_export_list)
@@ -966,9 +1060,11 @@ class IndiaStateAllocator:
         
         for product in products:
             national_import_value = national_imports[product]
+            industry_id = product_sector_map.get(product, None)
+            if not industry_id or industry_id == "-1":
+                industry_id = self._resolve_industry_id_from_exiobase_label(product)
             
-            # For imports, allocate based on consumption (proxied by GSDP)
-            # More sophisticated: could use sector consumption patterns
+            # For imports, allocate based on consumption (proxied by total state output/GSDP)
             state_shares = self.state_sector_output.groupby('state')['output'].sum()
             state_shares = state_shares / state_shares.sum()
             
@@ -988,6 +1084,7 @@ class IndiaStateAllocator:
                 state_import_list.append({
                     'state': state,
                     'exiobase_product': product,
+                    'industry_id': industry_id,
                     'import_value': state_import_value,
                     'hs_code': hs_code_value,
                     'allocation_method': 'gsdp_proportion'
@@ -1400,23 +1497,24 @@ class IndiaStateAllocator:
         return trade_mapped
     
     def _create_product_sector_map(self):
-        """Create mapping from EXIOBASE products to sectors"""
-        # This is simplified - should use proper EXIOBASE product-sector mapping
+        """Map EXIOBASE product labels (name or 5-char id) to industry_id for state allocation."""
+        product_sector_map = {}
         if self.industry_mapping is not None:
-            # Use industry mapping if available
-            return dict(zip(
-                self.industry_mapping['name'],
-                self.industry_mapping['industry_id']
-            ))
-        else:
-            # Basic mapping based on product names
-            product_sector_map = {}
-            if self.hs_exiobase_mapping is not None:
-                for _, row in self.hs_exiobase_mapping.iterrows():
-                    product = row['exiobase_product']
-                    sector = row.get('exiobase_sector', product)
-                    product_sector_map[product] = sector
-            return product_sector_map
+            for _, row in self.industry_mapping.iterrows():
+                name = row["name"]
+                iid = row["industry_id"]
+                product_sector_map[name] = iid
+                product_sector_map[iid] = iid
+        if self.hs_exiobase_mapping is not None:
+            for _, row in self.hs_exiobase_mapping.iterrows():
+                iid = row["industry_id"] if "industry_id" in row.index else "-1"
+                if pd.isna(iid) or str(iid).strip() == "":
+                    iid = "-1"
+                iid = str(iid).strip()
+                for col in ("exiobase_product", "exiobase_sector"):
+                    if col in row.index and pd.notna(row[col]) and str(row[col]).strip():
+                        product_sector_map[str(row[col]).strip()] = iid
+        return product_sector_map
     
     def _calculate_technical_coefficients(self, sut_df):
         """Calculate technical coefficient matrix (A-matrix) from SUT"""
@@ -1461,21 +1559,19 @@ class IndiaStateAllocator:
         print("="*60)
         
         if output_dir is None:
-    # Save inside: webroot/trade-data/year/2023/IN/domestic
-            project_root = Path(__file__).resolve().parents[2]  # /webroot
-            output_dir = (
-                project_root /
-                "trade-data" /
-                "year" /
-                "2023" /
-                "IN" /
-                "domestic"
-            )
+            tradeflow_root = Path(__file__).resolve().parent.parent
+            rel = self.config["FOLDERS"]["domestic"].format(year=self.year, country="IN")
+            output_dir = (tradeflow_root / rel).resolve()
         else:
             output_dir = Path(output_dir)
         
         output_dir.mkdir(parents=True, exist_ok=True)
         print(f"Output directory: {output_dir}")
+
+        crosswalk_src = Path(__file__).resolve().parent / "india_us_exiobase_crosswalk.csv"
+        if crosswalk_src.exists():
+            shutil.copy(crosswalk_src, output_dir / "india_us_exiobase_crosswalk.csv")
+            print(f"✅ Copied India–US Exiobase crosswalk to: {output_dir / 'india_us_exiobase_crosswalk.csv'}")
         
         # Save state × sector output matrix
         if self.state_sector_output is not None:
@@ -1527,6 +1623,9 @@ class IndiaStateAllocator:
             f.write(f"# India State-Level Allocation Report\n\n")
             f.write(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"**Year**: {self.year}\n\n")
+            f.write("## India–US Exiobase alignment\n\n")
+            f.write("Indian GSVA activity strings map to Exiobase `industry_id` (5-character codes) via ")
+            f.write("`india_us_exiobase_crosswalk.csv` — the same `industry_id` dimension as US `trade-data` outputs.\n\n")
             
             f.write("## Data Sources\n\n")
             f.write(f"- GSDP Data: {len(self.gsdp_data) if self.gsdp_data is not None else 0} records\n")
@@ -1567,7 +1666,7 @@ class IndiaStateAllocator:
         
         print(f"✅ Created summary report: {report_file}")
     
-    def run_full_allocation(self):
+    def run_full_allocation(self, output_dir=None):
         """Run the complete allocation process"""
         print("\n" + "="*80)
         print("INDIA STATE-LEVEL ALLOCATION PROCESS")
@@ -1589,7 +1688,7 @@ class IndiaStateAllocator:
         self.scale_sut_to_states()
         
         # Step 6: Save outputs
-        self.save_outputs()
+        self.save_outputs(output_dir=output_dir)
         
         print("\n" + "="*80)
         print("✅ ALLOCATION PROCESS COMPLETE")
@@ -1641,7 +1740,7 @@ def main():
     try:
         print("Initializing India State Allocation...")
         allocator = IndiaStateAllocator(data_dir=args.data_dir, year=args.year)
-        allocator.run_full_allocation()
+        allocator.run_full_allocation(output_dir=args.output_dir)
         
     except Exception as e:
         print(f"\n❌ Error: {e}")

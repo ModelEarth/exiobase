@@ -19,7 +19,7 @@ connections:
   model-earth-db:
     type: mssql
     host: model-earth-server.database.windows.net
-    database: ModelEarthDB
+    database: IndustryDB
     user: sqladmin
     password: ModelEarth11!!
     port: 1433

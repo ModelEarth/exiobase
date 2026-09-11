@@ -104,28 +104,28 @@ Place your India data files in the `India_data` folder (or specify with `--data-
 
 ```bash
 # From tradeflow directory
-python india-state-allocation.py
+python india/main.py
 ```
 
 This will:
 - Look for data in `../India_data` folder
 - Use year from `config.yaml`
-- Save outputs to `year/{year}/IN/state_allocation/`
+- Save outputs to `../../trade-data/year/{year}/IN/domestic/` (per `config.yaml` `FOLDERS.domestic`)
 
 ### Advanced Usage
 
 ```bash
 # Specify custom data directory
-python india-state-allocation.py --data-dir /path/to/India_data
+python india/main.py --data-dir /path/to/India_data
 
 # Specify year
-python india-state-allocation.py --year 2019
+python india/main.py --year 2019
 
 # Specify output directory
-python india-state-allocation.py --output-dir /path/to/output
+python india/main.py --output-dir /path/to/output
 
 # Combine options
-python india-state-allocation.py --data-dir ../India_data --year 2019 --output-dir ./output
+python india/main.py --data-dir ../India_data --year 2019 --output-dir ./output
 ```
 
 ## Processing Steps
@@ -242,13 +242,13 @@ mkdir India_data
 
 # 2. Run allocation
 cd tradeflow
-python india-state-allocation.py --data-dir ../India_data --year 2019
+python india/main.py --data-dir ../India_data --year 2019
 
 # 3. Check outputs
-ls -la ../../trade-data/year/2019/IN/state_allocation/
+ls -la ../../trade-data/year/2019/IN/domestic/
 
 # 4. Review report
-cat ../../trade-data/year/2019/IN/state_allocation/allocation_report.md
+cat ../../trade-data/year/2019/IN/domestic/allocation_report.md
 ```
 
 ## Future Enhancements

@@ -129,7 +129,7 @@ def create_split_resources():
         
         # Calculate summary statistics
         summary = factors_data.groupby('trade_id').agg({
-            'impact_value': ['sum', 'count'],
+            'level': ['sum', 'count'],
             'factor_id': 'nunique'
         }).round(3)
         
@@ -138,7 +138,7 @@ def create_split_resources():
         summary = summary.reset_index()
         
         # Calculate impact by context within this category
-        context_impacts = factors_data.groupby(['trade_id', 'context'])['impact_value'].sum().unstack(fill_value=0)
+        context_impacts = factors_data.groupby(['trade_id', 'context'])['level'].sum().unstack(fill_value=0)
         context_impacts = context_impacts.round(3)
         
         # Calculate specific subcategories
@@ -173,7 +173,7 @@ def create_split_resources():
             ]
             
             if not matching_factors.empty:
-                subcat_impact = matching_factors.groupby('trade_id')['impact_value'].sum()
+                subcat_impact = matching_factors.groupby('trade_id')['level'].sum()
                 subcategory_impacts[f'{category}_{subcat_name}'] = subcat_impact
         
         subcategory_impacts = subcategory_impacts.fillna(0).round(3)

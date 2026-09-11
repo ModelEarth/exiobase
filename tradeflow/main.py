@@ -160,7 +160,8 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     scripts = [
         'trade.py',
         'trade_impact.py',
-        'trade_resource.py'
+        'trade_resource.py',
+        'trade_competitiveness.py',
     ]
     
     success_count = 0
@@ -185,7 +186,9 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
         try:
             result = subprocess.run([
                 sys.executable, script
-            ], capture_output=True, text=True, timeout=1200)  # 20 minutes per script
+            ], capture_output=True, text=True, timeout=1200,  # 20 minutes per script
+               cwd=Path(__file__).parent,
+               env={**os.environ, 'EXIOBASE_TRADEFLOW': tradeflow, 'EXIOBASE_COUNTRY': country})
             
             script_time = time.time() - script_start
             
@@ -202,7 +205,11 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
                 print(f"[ERROR] {script} failed after {script_time:.1f}s")
                 if result.stderr:
                     error_lines = result.stderr.strip().split('\n')
-                    print(f"   [WARN]  Error: {error_lines[-1] if error_lines else 'Unknown error'}")
+                    last_error = error_lines[-1] if error_lines else 'Unknown error'
+                    print(f"   [WARN]  Error: {last_error}")
+                    if 'ModuleNotFoundError' in result.stderr or 'No module named' in result.stderr:
+                        print(f"   [HINT]  Missing Python package. Install dependencies with:")
+                        print(f"          pip install -r {Path(__file__).parent / 'requirements.txt'}")
                 break
                 
         except subprocess.TimeoutExpired:

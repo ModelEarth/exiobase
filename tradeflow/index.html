@@ -1,54 +1,536 @@
 <!DOCTYPE html>
 <html lang="en-us">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <title>Tradeflow</title>
 <link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<!--
-  To host your site, fork the localsite repo and turn on GitHub Pages.
-  View your site at https://[your account].github.io
--->
-<link type="text/css" rel="stylesheet" href="../../localsite/css/base.css" id="/localsite/css/base.css" />
-<script type="text/javascript" src="../../localsite/js/localsite.js?showheader=true&showsearch=true"></script>
-
+<link type="text/css" rel="stylesheet" href="../../localsite/css/base.css" id="/localsite/css/base.css" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.href='https://model.earth/localsite/css/base.css';}">
+<script type="text/javascript" src="../../localsite/js/localsite.js?showheader=true&showsearch=true" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='https://model.earth/localsite/js/localsite.js?showheader=true&showsearch=true';}"></script>
 <style>
-.content table {
-  background-color: #ddd;
+.content table { background-color: #ddd; }
+.dark .content table { background-color: #555; }
+.content th { background-color: #ccc; }
+.dark .content th { background-color: #676; }
+th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #999 !important; }
+
+/* Insert Data controls */
+.tradeflow-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 10px 0;
 }
-.dark .content table {
-  background-color: #555;
+.tradeflow-controls label {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-secondary, #555);
 }
-.content th {
-  background-color: #ccc;
+#tradeflowYear {
+  padding: 7px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+  cursor: pointer;
+  min-width: 90px;
 }
-.dark .content th {
-  background-color: #676;
+.dark #tradeflowYear {
+  background: #333;
+  color: #eee;
+  border-color: #555;
 }
-th, td {
-  padding: 4px 20px 4px 8px;
-  text-align: left;
-  border-bottom: 1px solid #999 !important;
+.btn-insert {
+  padding: 7px 18px;
+  background: #10B981;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.2s;
+}
+.btn-insert:hover { background: #059669; }
+.btn-insert:disabled { background: #9CA3AF; cursor: not-allowed; }
+.insert-status {
+  margin-top: 8px;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: none;
+}
+.insert-status.info    { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; display: block; }
+.insert-status.success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; display: block; }
+.insert-status.error   { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; display: block; }
+.dark .insert-status.info    { background: #1e3a5f; color: #93C5FD; border-color: #2563EB; }
+.dark .insert-status.success { background: #064e3b; color: #6EE7B7; border-color: #059669; }
+.dark .insert-status.error   { background: #7f1d1d; color: #FCA5A5; border-color: #DC2626; }
+
+/* Schema diagram */
+.schema-panel {
+  margin: 18px 0;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+.dark .schema-panel { background: #1e1e1e; border-color: #374151; }
+.schema-panel h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 14px 0;
+  color: #111;
+}
+.dark .schema-panel h3 { color: #e5e7eb; }
+#schema-diagram {
+  width: 100%;
+  overflow-x: auto;
+}
+#schema-svg {
+  width: 100%;
+  display: block;
+}
+.schema-loading {
+  font-size: 13px;
+  color: #6B7280;
+  font-style: italic;
+}
+table {
+  margin-top: 12px;
+  margin-bottom: 16px;
 }
 </style>
 
 <script>
-loadMarkdown("README.md", "readmeDiv", "_parent");
-loadMarkdown("CLAUDE.md", "claudeDiv", "_parent");
+function loadTradeflowMarkdown() {
+  loadMarkdown("README.md", "readmeDiv", "_parent");
+  loadMarkdown("AGENTS.md", "agentsDiv", "_parent");
+}
+
+const tradeflowMarkdownWaitStart = Date.now();
+
+// An external localsite.js link is provides above.
+function waitForLocalsiteJs() { // Detects when loadMarkdown is available.
+  if (typeof loadMarkdown === 'function') {
+    loadTradeflowMarkdown();
+  } else if (Date.now() - tradeflowMarkdownWaitStart < 10000) {
+    requestAnimationFrame(waitForLocalsiteJs);
+  } else {
+    console.error('localsite.js did not load within 10 seconds.'); // Give up after 10 seconds
+  }
+}
+waitForLocalsiteJs();
 </script>
 
 </head>
 
 <body>
 <div class="content contentpadding large-list">
-  <div style="float:right;margin-top:6px">
+  <div class="noprint" style="float:right;margin-top:6px">
     <a href="https://github.com/ModelEarth/exiobase/tree/main/tradeflow"><img src="../../localsite/img/icon/github/github.png" style="width:42px"></a>
   </div>
   <a href="../../profile/trade">Trade Profiles</a>
+
+  <!-- Year dropdown + Insert Data button -->
+  <div class="tradeflow-controls">
+    <label for="tradeflowYear">Year:</label>
+    <select id="tradeflowYear">
+      <option value="2022">2022</option>
+      <option value="2021">2021</option>
+      <option value="2020">2020</option>
+      <option value="2019" selected>2019</option>
+    </select>
+    <button class="btn-insert" id="btnInsertData">
+      <span class="material-icons" style="font-size:16px">upload</span>
+      Insert Data
+    </button>
+  </div>
+  <div class="insert-status" id="insertStatus"></div>
+
+  <!-- Real-time schema diagram -->
+  <div class="schema-panel">
+    <h3>Industry Database Schema</h3>
+    <div id="schema-diagram">
+      <div class="schema-loading" id="schemaLoading">Loading schema from Industry Database...</div>
+      <svg id="schema-svg" style="display:none"></svg>
+    </div>
+  </div>
+
   <div id="readmeDiv"></div>
-  <div id="claudeDiv"></div>
+  <div id="agentsDiv"></div>
 </div>
+
+<script>
+(function () {
+  'use strict';
+
+  const RUST_API = 'http://localhost:8081/api';
+  const YEARS = ['2022','2021','2020','2019'];
+
+  // ---- Hash helpers ----
+  function safeGetHash() {
+    return (typeof getHash === 'function') ? getHash() : {};
+  }
+  function safeGoHash(obj) {
+    if (typeof goHash === 'function') goHash(obj);
+    else {
+      // Fallback: manually update hash
+      const h = safeGetHash();
+      Object.assign(h, obj);
+      const str = Object.entries(h).map(([k,v]) => `${k}=${v}`).join('&');
+      location.hash = str;
+    }
+  }
+
+  // ---- Year dropdown ----
+  const yearSel = document.getElementById('tradeflowYear');
+  yearSel.addEventListener('change', function () {
+    safeGoHash({ tradeflowYear: this.value });
+  });
+
+  function syncYearFromHash() {
+    const hash = safeGetHash();
+    const yr = hash.tradeflowYear;
+    if (yr && YEARS.includes(yr)) {
+      yearSel.value = yr;
+    }
+  }
+
+  // ---- Hash change listener ----
+  document.addEventListener('hashChangeEvent', syncYearFromHash);
+  syncYearFromHash();
+
+  // ---- Insert Data button ----
+  const btnInsert = document.getElementById('btnInsertData');
+  const status   = document.getElementById('insertStatus');
+
+  function showStatus(msg, type) {
+    status.className = 'insert-status ' + type;
+    status.textContent = msg;
+  }
+
+  btnInsert.addEventListener('click', function () {
+    const hash = safeGetHash();
+    const country = hash.country;
+
+    if (!country) {
+      // No country in hash — prompt country selection via geoview
+      safeGoHash({ geoview: 'countries' });
+      showStatus('Please choose a country from the map above, then click Insert Data again.', 'info');
+      return;
+    }
+
+    const year = yearSel.value;
+    btnInsert.disabled = true;
+    showStatus('Initializing tables and inserting CSV data for ' + country + ' ' + year + '...', 'info');
+
+    fetch(RUST_API + '/db/insert-trade-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ year: year, country: country })
+    })
+    .then(r => r.json())
+    .then(data => {
+      btnInsert.disabled = false;
+      if (data.success) {
+        const lines = (data.inserted || []).map(f => f.file + ': ' + f.rows.toLocaleString() + ' rows').join(' | ');
+        showStatus('Inserted ' + country + ' ' + year + ' — ' + lines, 'success');
+      } else {
+        const errs = (data.errors || []).join('; ');
+        const lines = (data.inserted || []).map(f => f.file + ': ' + f.rows.toLocaleString() + ' rows').join(' | ');
+        const partial = lines ? ' Partial: ' + lines + '.' : '';
+        showStatus('Errors: ' + (errs || 'Unknown error') + partial, 'error');
+      }
+      loadSchemaDiagram();
+    })
+    .catch(err => {
+      btnInsert.disabled = false;
+      showStatus('Request failed: ' + err.message + ' — Is the Rust API running on port 8081?', 'error');
+    });
+  });
+
+  // ---- Schema diagram ----
+  function loadSchemaDiagram() {
+    fetch(RUST_API + '/db/industry-schema')
+      .then(r => r.json())
+      .then(data => renderSchemaDiagram(data))
+      .catch(() => renderSchemaDiagram(null));
+  }
+
+  function renderSchemaDiagram(data) {
+    document.getElementById('schemaLoading').style.display = 'none';
+    const svg = document.getElementById('schema-svg');
+    svg.style.display = '';
+    svg.innerHTML = '';
+
+    // Mutable layout positions for each table box
+    const layout = {"industry":{"x":22,"y":243},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343}}
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
+      if (saved) Object.keys(layout).forEach(k => { if (saved[k]) layout[k] = saved[k]; });
+    } catch(e) {}
+
+    const BOX_W = 190, BOX_H_BASE = 28, ROW_H = 18;
+    const tables = (data && data.tables) ? data.tables : {};
+    const staticSchema = getStaticSchema();
+
+    // Relationships: [from, to, label]
+    const rels = [
+      ['trade',           'industry',          'industry1/2'],
+      ['trade_factor',    'trade',             'trade_id+year+country+flow_type'],
+      ['trade_factor',    'factor',            'factor_id'],
+      ['interstate',      'industry',          'industry1/2'],
+      ['interstate',      'trade',             'trade_id (US domestic)'],
+      ['interstate_factor','interstate',       'interstate_id'],
+      ['interstate_factor','factor',           'factor_id'],
+    ];
+
+    // Compute box heights
+    const boxHeights = {};
+    Object.keys(layout).forEach(name => {
+      const cols = (tables[name] && tables[name].columns) ? tables[name].columns : (staticSchema[name] || []);
+      boxHeights[name] = BOX_H_BASE + cols.length * ROW_H + 6;
+    });
+
+    // Total SVG height; viewBox width matches container so 1 unit = 1px (tables stay same size)
+    const maxY = Math.max(...Object.entries(layout).map(([name, p]) => p.y + (boxHeights[name] || 80)));
+    const canvasW = Math.max(svg.parentElement.clientWidth || 0, 750);
+    svg.setAttribute('viewBox', `0 0 ${canvasW} ${maxY + 20}`);
+    svg.setAttribute('height', maxY + 20);
+
+    const NS = 'http://www.w3.org/2000/svg';
+
+    // Arrow marker
+    const defs = document.createElementNS(NS, 'defs');
+    defs.innerHTML = `
+      <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#9CA3AF"/>
+      </marker>`;
+    svg.appendChild(defs);
+
+    // Line layer drawn first so boxes render on top
+    const lineLayer = document.createElementNS(NS, 'g');
+    svg.appendChild(lineLayer);
+
+    const lineEls = {}, labelEls = {};
+    rels.forEach(([fromName, toName, label]) => {
+      const from = layout[fromName], to = layout[toName];
+      if (!from || !to) return;
+      const key = `${fromName}::${toName}`;
+      const fx = from.x + BOX_W / 2, fy = from.y + (boxHeights[fromName] || 80) / 2;
+      const tx = to.x + BOX_W / 2,   ty = to.y + (boxHeights[toName]   || 80) / 2;
+
+      const line = document.createElementNS(NS, 'line');
+      line.setAttribute('x1', fx); line.setAttribute('y1', fy);
+      line.setAttribute('x2', tx); line.setAttribute('y2', ty);
+      line.setAttribute('stroke', '#9CA3AF');
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-dasharray', '5,3');
+      line.setAttribute('marker-end', 'url(#arrowhead)');
+      lineLayer.appendChild(line);
+      lineEls[key] = line;
+
+      const txt = document.createElementNS(NS, 'text');
+      txt.setAttribute('x', (fx + tx) / 2); txt.setAttribute('y', (fy + ty) / 2 - 4);
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('font-size', '9');
+      txt.setAttribute('fill', '#9CA3AF');
+      txt.textContent = label;
+      lineLayer.appendChild(txt);
+      labelEls[key] = txt;
+    });
+
+    function updateLines(movedName) {
+      rels.forEach(([fromName, toName]) => {
+        if (fromName !== movedName && toName !== movedName) return;
+        const key = `${fromName}::${toName}`;
+        if (!lineEls[key]) return;
+        const from = layout[fromName], to = layout[toName];
+        const fx = from.x + BOX_W / 2, fy = from.y + (boxHeights[fromName] || 80) / 2;
+        const tx = to.x + BOX_W / 2,   ty = to.y + (boxHeights[toName]   || 80) / 2;
+        lineEls[key].setAttribute('x1', fx); lineEls[key].setAttribute('y1', fy);
+        lineEls[key].setAttribute('x2', tx); lineEls[key].setAttribute('y2', ty);
+        labelEls[key].setAttribute('x', (fx + tx) / 2);
+        labelEls[key].setAttribute('y', (fy + ty) / 2 - 4);
+      });
+    }
+
+    // Draw table boxes as draggable groups with relative coordinates
+    const groupEls = {};
+    Object.entries(layout).forEach(([name, pos]) => {
+      const info = tables[name] || {};
+      const cols = info.columns ? info.columns : (staticSchema[name] || []);
+      const exists = info.exists !== false;
+      const rowCount = info.row_count || 0;
+      const boxH = boxHeights[name];
+
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('transform', `translate(${pos.x}, ${pos.y})`);
+      g.setAttribute('data-table', name);
+      groupEls[name] = g;
+
+      // Shadow
+      const shadow = document.createElementNS(NS, 'rect');
+      shadow.setAttribute('x', 2); shadow.setAttribute('y', 2);
+      shadow.setAttribute('width', BOX_W); shadow.setAttribute('height', boxH);
+      shadow.setAttribute('rx', '6'); shadow.setAttribute('ry', '6');
+      shadow.setAttribute('fill', 'rgba(0,0,0,0.07)');
+      g.appendChild(shadow);
+
+      // Main box
+      const rect = document.createElementNS(NS, 'rect');
+      rect.setAttribute('x', 0); rect.setAttribute('y', 0);
+      rect.setAttribute('width', BOX_W); rect.setAttribute('height', boxH);
+      rect.setAttribute('rx', '6'); rect.setAttribute('ry', '6');
+      rect.setAttribute('fill', exists ? '#F0FDF4' : '#F9FAFB');
+      rect.setAttribute('stroke', exists ? '#10B981' : '#D1D5DB');
+      rect.setAttribute('stroke-width', exists ? '2' : '1.5');
+      g.appendChild(rect);
+
+      // Header bar (drag handle)
+      const hdr = document.createElementNS(NS, 'rect');
+      hdr.setAttribute('x', 0); hdr.setAttribute('y', 0);
+      hdr.setAttribute('width', BOX_W); hdr.setAttribute('height', BOX_H_BASE);
+      hdr.setAttribute('rx', '6'); hdr.setAttribute('ry', '6');
+      hdr.setAttribute('fill', exists ? '#10B981' : '#6B7280');
+      hdr.setAttribute('data-drag-handle', '1');
+      hdr.style.cursor = 'grab';
+      g.appendChild(hdr);
+
+      // Header bar bottom fill (square corners, also drag handle)
+      const hdr2 = document.createElementNS(NS, 'rect');
+      hdr2.setAttribute('x', 0); hdr2.setAttribute('y', BOX_H_BASE - 6);
+      hdr2.setAttribute('width', BOX_W); hdr2.setAttribute('height', 6);
+      hdr2.setAttribute('fill', exists ? '#10B981' : '#6B7280');
+      hdr2.setAttribute('data-drag-handle', '1');
+      hdr2.style.cursor = 'grab';
+      g.appendChild(hdr2);
+
+      // Table name (drag handle)
+      const tname = document.createElementNS(NS, 'text');
+      tname.setAttribute('x', 10); tname.setAttribute('y', 18);
+      tname.setAttribute('font-size', '12'); tname.setAttribute('font-weight', 'bold');
+      tname.setAttribute('fill', '#fff');
+      tname.setAttribute('data-drag-handle', '1');
+      tname.style.cursor = 'grab';
+      tname.textContent = name;
+      g.appendChild(tname);
+
+      // Row count badge (drag handle)
+      if (rowCount > 0) {
+        const badge = document.createElementNS(NS, 'text');
+        badge.setAttribute('x', BOX_W - 6); badge.setAttribute('y', 18);
+        badge.setAttribute('text-anchor', 'end');
+        badge.setAttribute('font-size', '10');
+        badge.setAttribute('fill', 'rgba(255,255,255,0.85)');
+        badge.setAttribute('data-drag-handle', '1');
+        badge.style.cursor = 'grab';
+        badge.textContent = rowCount.toLocaleString() + ' rows';
+        g.appendChild(badge);
+      }
+
+      // Columns
+      cols.forEach((col, i) => {
+        const colName = col.name || col;
+        const colType = col.type || '';
+        const cy = BOX_H_BASE + 4 + i * ROW_H + 13;
+
+        const ctext = document.createElementNS(NS, 'text');
+        ctext.setAttribute('x', 10); ctext.setAttribute('y', cy);
+        ctext.setAttribute('font-size', '10.5'); ctext.setAttribute('fill', '#374151');
+        ctext.textContent = colName;
+        g.appendChild(ctext);
+
+        if (colType) {
+          const dtype = document.createElementNS(NS, 'text');
+          dtype.setAttribute('x', BOX_W - 6); dtype.setAttribute('y', cy);
+          dtype.setAttribute('text-anchor', 'end');
+          dtype.setAttribute('font-size', '9.5'); dtype.setAttribute('fill', '#9CA3AF');
+          dtype.textContent = colType.replace('character varying', 'varchar').replace('bigint','bigserial');
+          g.appendChild(dtype);
+        }
+
+        if (i < cols.length - 1) {
+          const sep = document.createElementNS(NS, 'line');
+          sep.setAttribute('x1', 1); sep.setAttribute('y1', cy + 4);
+          sep.setAttribute('x2', BOX_W - 1); sep.setAttribute('y2', cy + 4);
+          sep.setAttribute('stroke', '#E5E7EB'); sep.setAttribute('stroke-width', '0.5');
+          g.appendChild(sep);
+        }
+      });
+
+      svg.appendChild(g);
+    });
+
+    // Drag state
+    let drag = null;
+
+    function svgCoords(e) {
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX; pt.y = e.clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    svg.addEventListener('mousedown', e => {
+      if (!e.target.getAttribute('data-drag-handle')) return;
+      const g = e.target.closest('[data-table]');
+      if (!g) return;
+      const name = g.getAttribute('data-table');
+      const p = svgCoords(e);
+      drag = { name, ox: p.x - layout[name].x, oy: p.y - layout[name].y };
+      svg.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+
+    function onMouseMove(e) {
+      if (!drag) return;
+      const p = svgCoords(e);
+      layout[drag.name].x = p.x - drag.ox;
+      layout[drag.name].y = p.y - drag.oy;
+      groupEls[drag.name].setAttribute('transform', `translate(${layout[drag.name].x}, ${layout[drag.name].y})`);
+      updateLines(drag.name);
+    }
+
+    function onMouseUp() {
+      if (!drag) return;
+      drag = null;
+      svg.style.cursor = '';
+      try { localStorage.setItem('industry-schema-positions', JSON.stringify(layout)); } catch(e) {}
+    }
+
+    // Clean up listeners from any previous render
+    if (svg._dragMove) document.removeEventListener('mousemove', svg._dragMove);
+    if (svg._dragUp)   document.removeEventListener('mouseup',   svg._dragUp);
+    svg._dragMove = onMouseMove;
+    svg._dragUp   = onMouseUp;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup',   onMouseUp);
+  }
+
+  function getStaticSchema() {
+    return {
+      industry: [{name:'industry_id',type:'varchar(10)'},{name:'name',type:'text'},{name:'category',type:'varchar(100)'}],
+      factor:   [{name:'factor_id',type:'integer'},{name:'unit',type:'varchar(50)'},{name:'stressor',type:'text'},{name:'extension',type:'varchar(100)'}],
+      trade:    [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(10)'},{name:'country',type:'varchar(10)'}],
+      trade_factor: [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
+      interstate: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'state_industry_code',type:'varchar(30)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
+      interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'factor_id',type:'integer'},{name:'level',type:'numeric'}]
+    };
+  }
+
+  // Load diagram on page load
+  waitForElm('#schema-svg').then(() => loadSchemaDiagram());
+
+})();
+</script>
+
 </body>
 </html>
