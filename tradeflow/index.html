@@ -75,6 +75,7 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
 
 /* Schema diagram */
 .schema-panel {
+  position: relative;
   margin: 18px 0;
   padding: 16px 18px;
   background: #fff;
@@ -82,6 +83,20 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
   border-radius: 10px;
 }
 .dark .schema-panel { background: #1e1e1e; border-color: #374151; }
+.schema-panel-spinner {
+  display: none;
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border: 4px solid #D1D5DB;
+  border-top-color: #6B7280;
+  border-radius: 50%;
+  animation: schema-spin 0.8s linear infinite;
+}
+.dark .schema-panel-spinner { border-color: #4B5563; border-top-color: #9CA3AF; }
+@keyframes schema-spin { to { transform: rotate(360deg); } }
 .schema-panel h3 {
   font-size: 15px;
   font-weight: 600;
@@ -133,6 +148,11 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
   color: #111;
 }
 .dark .schema-about-panel h4 { color: #e5e7eb; }
+.schema-about-panel h4 a {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
 .schema-about-panel section { margin-bottom: 16px; }
 .schema-about-panel section:last-child { margin-bottom: 0; }
 .schema-about-panel ul { margin: 4px 0 0 18px; padding: 0; }
@@ -216,6 +236,7 @@ waitForLocalsiteJs();
   <!-- Real-time schema diagram -->
   <div class="schema-panel">
     <h3>Industry Database Schema</h3>
+    <div class="schema-panel-spinner" id="schemaPanelSpinner" title="Loading live schema…"></div>
     <div id="schema-diagram">
       <div class="schema-loading" id="schemaLoading">Loading schema from Industry Database...</div>
       <svg id="schema-svg" style="display:none"></svg>
@@ -232,7 +253,7 @@ waitForLocalsiteJs();
 
   <div class="schema-about-panel" id="schemaAboutPanel">
     <section>
-      <h4>Schema</h4>
+      <h4>Schema <a href="https://github.com/ModelEarth/team/blob/main/src/main.rs#L2108" target="_blank" rel="noopener noreferrer">View SQL Schema</a></h4>
       <p>Six tables: <code>industry</code> and <code>factor</code> are shared reference tables (sector definitions, 721 environmental factors); <code>trade</code> and <code>trade_factor</code> hold international flows and their environmental coefficients per year/country/flow_type; <code>interstate</code> and <code>interstate_factor</code> hold US state-to-state (BEA) flows. Each table's box shows column names and types.</p>
       <p>The diagram's columns come from two sources: a hardcoded static schema (in this page's JS and mirrored in the Rust API) used as an instant preview, and the live database schema (queried from Postgres <code>information_schema.columns</code>) once the API responds. The two can drift out of sync — that's why a column can briefly appear then disappear (as happened with a leftover <code>id</code> column already removed from the live tables but not yet from the static fallbacks).</p>
     </section>
@@ -404,23 +425,26 @@ waitForLocalsiteJs();
   // Live row counts (and the three-dot menu) are added once this resolves,
   // so the diagram itself doesn't wait on the network round trip to draw.
   function loadSchemaDiagram() {
+    const spinner = document.getElementById('schemaPanelSpinner');
+    if (spinner) spinner.style.display = 'block';
     fetch(RUST_API + '/db/industry-schema')
       .then(r => r.json())
       .then(data => renderSchemaDiagram(data))
-      .catch(() => renderSchemaDiagram(null));
+      .catch(() => renderSchemaDiagram(null))
+      .finally(() => { if (spinner) spinner.style.display = 'none'; });
   }
 
   const NS = 'http://www.w3.org/2000/svg';
 
   // Row count badge + three-dot menu toggle for one table box (added in a
   // follow-up pass so the initial diagram doesn't wait on these).
-  function addTableExtras(g, name, rowCount, boxW) {
+  function addTableExtras(g, name, rowCount, boxW, countKnown) {
     boxW = boxW || 190;
-    if (rowCount > 0) {
+    if (rowCount > 0 || countKnown) {
       const badge = document.createElementNS(NS, 'text');
       badge.setAttribute('x', boxW - 20); badge.setAttribute('y', 18);
       badge.setAttribute('text-anchor', 'end');
-      badge.setAttribute('font-size', '10');
+      badge.setAttribute('font-size', '11');
       badge.setAttribute('fill', 'rgba(255,255,255,0.85)');
       badge.setAttribute('data-drag-handle', '1');
       badge.style.cursor = 'grab';
@@ -428,17 +452,27 @@ waitForLocalsiteJs();
       g.appendChild(badge);
     }
 
+    const menuGroup = document.createElementNS(NS, 'g');
+    menuGroup.setAttribute('data-menu-toggle', '1');
+    menuGroup.setAttribute('data-table', name);
+    menuGroup.style.cursor = 'pointer';
+
+    const menuHit = document.createElementNS(NS, 'rect');
+    menuHit.setAttribute('x', boxW - 26); menuHit.setAttribute('y', 2);
+    menuHit.setAttribute('width', 26); menuHit.setAttribute('height', 26);
+    menuHit.setAttribute('fill', 'transparent');
+    menuGroup.appendChild(menuHit);
+
     const menuBtn = document.createElementNS(NS, 'text');
     menuBtn.setAttribute('x', boxW - 6); menuBtn.setAttribute('y', 18);
     menuBtn.setAttribute('text-anchor', 'end');
     menuBtn.setAttribute('font-size', '13');
     menuBtn.setAttribute('font-weight', 'bold');
     menuBtn.setAttribute('fill', '#fff');
-    menuBtn.setAttribute('data-menu-toggle', '1');
-    menuBtn.setAttribute('data-table', name);
-    menuBtn.style.cursor = 'pointer';
     menuBtn.textContent = '⋮';
-    g.appendChild(menuBtn);
+    menuGroup.appendChild(menuBtn);
+
+    g.appendChild(menuGroup);
   }
 
   function renderSchemaDiagram(data, deferExtras) {
@@ -457,6 +491,7 @@ waitForLocalsiteJs();
 
     const BOX_W = 190, BOX_H_BASE = 28, ROW_H = 18;
     const tables = (data && data.tables) ? data.tables : {};
+    const isLive = !!(data && data.tables);
     const staticSchema = getStaticSchema();
 
     // Relationships: [from, to, label]
@@ -545,6 +580,23 @@ waitForLocalsiteJs();
       const cols = info.columns ? info.columns : (staticSchema[name] || []);
       const exists = info.exists !== false;
       const rowCount = info.row_count || 0;
+      // count_known: true once a real (possibly zero) count came back from
+      // pg_stat_user_tables. exists-but-!countKnown means the table is there
+      // but its row count couldn't be confirmed — distinct from a table that
+      // was actually measured and found empty.
+      const countKnown = isLive ? info.count_known === true : false;
+      const unconfirmed = isLive && exists && !countKnown;
+
+      // Box color state: dark grey while the live schema hasn't loaded yet
+      // (nothing confirmed either way), light grey once we know for certain
+      // a table doesn't exist, amber when it exists but its count is
+      // unconfirmed, green once the count is confirmed (0 or more).
+      let fill, stroke, headerColor;
+      if (!isLive)          { fill = '#E5E7EB'; stroke = '#9CA3AF'; headerColor = '#4B5563'; }
+      else if (!exists)     { fill = '#F9FAFB'; stroke = '#D1D5DB'; headerColor = '#6B7280'; }
+      else if (unconfirmed) { fill = '#FFFBEB'; stroke = '#F59E0B'; headerColor = '#F59E0B'; }
+      else                  { fill = '#F0FDF4'; stroke = '#10B981'; headerColor = '#10B981'; }
+
       const boxH = boxHeights[name];
 
       const g = document.createElementNS(NS, 'g');
@@ -565,9 +617,9 @@ waitForLocalsiteJs();
       rect.setAttribute('x', 0); rect.setAttribute('y', 0);
       rect.setAttribute('width', BOX_W); rect.setAttribute('height', boxH);
       rect.setAttribute('rx', '6'); rect.setAttribute('ry', '6');
-      rect.setAttribute('fill', exists ? '#F0FDF4' : '#F9FAFB');
-      rect.setAttribute('stroke', exists ? '#10B981' : '#D1D5DB');
-      rect.setAttribute('stroke-width', exists ? '2' : '1.5');
+      rect.setAttribute('fill', fill);
+      rect.setAttribute('stroke', stroke);
+      rect.setAttribute('stroke-width', (isLive && !exists) ? '1.5' : '2');
       g.appendChild(rect);
 
       // Header bar (drag handle)
@@ -575,7 +627,7 @@ waitForLocalsiteJs();
       hdr.setAttribute('x', 0); hdr.setAttribute('y', 0);
       hdr.setAttribute('width', BOX_W); hdr.setAttribute('height', BOX_H_BASE);
       hdr.setAttribute('rx', '6'); hdr.setAttribute('ry', '6');
-      hdr.setAttribute('fill', exists ? '#10B981' : '#6B7280');
+      hdr.setAttribute('fill', headerColor);
       hdr.setAttribute('data-drag-handle', '1');
       hdr.style.cursor = 'grab';
       g.appendChild(hdr);
@@ -584,7 +636,7 @@ waitForLocalsiteJs();
       const hdr2 = document.createElementNS(NS, 'rect');
       hdr2.setAttribute('x', 0); hdr2.setAttribute('y', BOX_H_BASE - 6);
       hdr2.setAttribute('width', BOX_W); hdr2.setAttribute('height', 6);
-      hdr2.setAttribute('fill', exists ? '#10B981' : '#6B7280');
+      hdr2.setAttribute('fill', headerColor);
       hdr2.setAttribute('data-drag-handle', '1');
       hdr2.style.cursor = 'grab';
       g.appendChild(hdr2);
@@ -601,7 +653,7 @@ waitForLocalsiteJs();
 
       // Row count badge + three-dot menu toggle are populated in a follow-up
       // pass (see addTableExtras) so the initial diagram paints immediately.
-      if (!deferExtras) addTableExtras(g, name, rowCount);
+      if (!deferExtras) addTableExtras(g, name, rowCount, undefined, countKnown);
 
       // Columns
       cols.forEach((col, i) => {
