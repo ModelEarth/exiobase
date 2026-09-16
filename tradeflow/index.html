@@ -75,6 +75,7 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
 
 /* Schema diagram */
 .schema-panel {
+  position: relative;
   margin: 18px 0;
   padding: 16px 18px;
   background: #fff;
@@ -82,6 +83,20 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
   border-radius: 10px;
 }
 .dark .schema-panel { background: #1e1e1e; border-color: #374151; }
+.schema-panel-spinner {
+  display: none;
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border: 4px solid #D1D5DB;
+  border-top-color: #6B7280;
+  border-radius: 50%;
+  animation: schema-spin 0.8s linear infinite;
+}
+.dark .schema-panel-spinner { border-color: #4B5563; border-top-color: #9CA3AF; }
+@keyframes schema-spin { to { transform: rotate(360deg); } }
 .schema-panel h3 {
   font-size: 15px;
   font-weight: 600;
@@ -102,6 +117,70 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
   color: #6B7280;
   font-style: italic;
 }
+.schema-source {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.schema-source a { color: #6B7280; cursor: pointer; }
+.dark .schema-source a { color: #9CA3AF; }
+
+/* About schema panel */
+.schema-about-panel {
+  display: none;
+  margin: 10px 0 18px 0;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+}
+.schema-about-panel.open { display: block; }
+.dark .schema-about-panel { background: #1e1e1e; border-color: #374151; color: #d1d5db; }
+.schema-about-panel h4 {
+  margin: 0 0 6px 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #111;
+}
+.dark .schema-about-panel h4 { color: #e5e7eb; }
+.schema-about-panel h4 a {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.schema-about-panel section { margin-bottom: 16px; }
+.schema-about-panel section:last-child { margin-bottom: 0; }
+.schema-about-panel ul { margin: 4px 0 0 18px; padding: 0; }
+.schema-about-panel li { margin-bottom: 4px; }
+#schema-diagram { position: relative; }
+.schema-menu {
+  position: absolute;
+  display: none;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 20;
+  overflow: hidden;
+}
+.dark .schema-menu { background: #262626; border-color: #374151; }
+.schema-menu a {
+  display: block;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: #374151;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.schema-menu a:hover { background: #F3F4F6; }
+.dark .schema-menu a { color: #e5e7eb; }
+.dark .schema-menu a:hover { background: #374151; }
 table {
   margin-top: 12px;
   margin-bottom: 16px;
@@ -157,10 +236,40 @@ waitForLocalsiteJs();
   <!-- Real-time schema diagram -->
   <div class="schema-panel">
     <h3>Industry Database Schema</h3>
+    <div class="schema-panel-spinner" id="schemaPanelSpinner" title="Loading live schema…"></div>
     <div id="schema-diagram">
       <div class="schema-loading" id="schemaLoading">Loading schema from Industry Database...</div>
       <svg id="schema-svg" style="display:none"></svg>
+      <div class="schema-menu" id="schemaTableMenu">
+        <a href="#" id="schemaMenuCsvLink" target="_blank" rel="noopener noreferrer">View CSV data</a>
+        <a href="#" id="schemaMenuInsightsLink" target="_parent">Dataset Insights</a>
+      </div>
     </div>
+    <div class="schema-source">
+      <a href="#" id="schemaAboutToggle">About schema</a>
+      <a href="https://github.com/ModelEarth/trade-data/tree/main/year/2019" id="schemaSourceLink" target="_parent">Data source</a>
+    </div>
+  </div>
+
+  <div class="schema-about-panel" id="schemaAboutPanel">
+    <section>
+      <h4>Schema <a href="https://github.com/ModelEarth/team/blob/main/src/main.rs#L2108" target="_blank" rel="noopener noreferrer">View SQL Schema</a></h4>
+      <p>Six tables: <code>industry</code> and <code>factor</code> are shared reference tables (sector definitions, 721 environmental factors); <code>trade</code> and <code>trade_factor</code> hold international flows and their environmental coefficients per year/country/flow_type; <code>interstate</code> and <code>interstate_factor</code> hold US state-to-state (BEA) flows. Each table's box shows column names and types.</p>
+      <p>The diagram's columns come from two sources: a hardcoded static schema (in this page's JS and mirrored in the Rust API) used as an instant preview, and the live database schema (queried from Postgres <code>information_schema.columns</code>) once the API responds. The two can drift out of sync — that's why a column can briefly appear then disappear (as happened with a leftover <code>id</code> column already removed from the live tables but not yet from the static fallbacks).</p>
+    </section>
+    <section>
+      <h4>Indexes</h4>
+      <p>Indexes aren't arbitrary — each one mirrors a real join or filter the app performs:</p>
+      <ul>
+        <li><strong>Composite lookup indexes</strong> on <code>(trade_id, year, country, flow_type)</code> for <code>trade</code> and <code>trade_factor</code> — this is the exact compound key used to join those tables, since <code>trade_id</code> alone repeats across years/countries/flow types.</li>
+        <li><strong>Filter-column indexes</strong> on <code>year</code>, <code>country</code>, <code>region1</code>, <code>region2</code>, <code>flow_type</code> — these back the year/country selections made in this page's UI.</li>
+        <li><strong>Foreign-key indexes</strong> on <code>factor_id</code> and <code>interstate_id</code> — speed up joining fact tables back to their dimension tables (<code>factor</code>, <code>interstate</code>).</li>
+      </ul>
+    </section>
+    <section>
+      <h4>Loading asynchronously</h4>
+      <p>The diagram used to wait on a fetch to the Rust API (<code>/api/db/industry-schema</code>) before drawing anything, so a slow or unresponsive database made the whole page feel stalled. Now it draws immediately using the static schema, then fetches the live schema in the background and re-renders — adding real row counts and the ⋮ per-table menu once that data arrives.</p>
+    </section>
   </div>
 
   <div id="readmeDiv"></div>
@@ -191,8 +300,25 @@ waitForLocalsiteJs();
 
   // ---- Year dropdown ----
   const yearSel = document.getElementById('tradeflowYear');
+  const schemaSourceLink = document.getElementById('schemaSourceLink');
+
+  function updateSchemaSourceLink(year) {
+    if (schemaSourceLink) {
+      schemaSourceLink.href = 'https://github.com/ModelEarth/trade-data/tree/main/year/' + year;
+    }
+  }
+
+  // ---- About schema toggle ----
+  const schemaAboutToggle = document.getElementById('schemaAboutToggle');
+  const schemaAboutPanel  = document.getElementById('schemaAboutPanel');
+  schemaAboutToggle.addEventListener('click', function (e) {
+    e.preventDefault();
+    schemaAboutPanel.classList.toggle('open');
+  });
+
   yearSel.addEventListener('change', function () {
     safeGoHash({ tradeflowYear: this.value });
+    updateSchemaSourceLink(this.value);
   });
 
   function syncYearFromHash() {
@@ -201,11 +327,50 @@ waitForLocalsiteJs();
     if (yr && YEARS.includes(yr)) {
       yearSel.value = yr;
     }
+    updateSchemaSourceLink(yearSel.value);
   }
 
   // ---- Hash change listener ----
   document.addEventListener('hashChangeEvent', syncYearFromHash);
   syncYearFromHash();
+
+  // ---- CSV data link (resolves each table straight to its GitHub file) ----
+  function getCsvRelPath(tableName) {
+    const year = yearSel.value;
+    const country = (safeGetHash().country || 'US').toUpperCase();
+    // flow_type (domestic/imports/exports) isn't selectable on this page yet — default to imports.
+    const flowType = 'imports';
+    switch (tableName) {
+      case 'industry':
+        return `year/${year}/industry.csv`;
+      case 'factor':
+        return `year/${year}/factor.csv`;
+      case 'trade':
+        return `year/${year}/${country}/${flowType}/trade.csv`;
+      case 'trade_factor':
+        return `year/${year}/${country}/${flowType}/trade_factor.csv`;
+      case 'interstate':
+        return `year/${year}/US/domestic/bea_trade_detail.csv`;
+      case 'interstate_factor':
+        return `year/${year}/US/domestic/state_trade_flows.csv`;
+      default:
+        return `year/${year}`;
+    }
+  }
+
+  // Human-viewable GitHub page for a table's CSV.
+  function getCsvLink(tableName) {
+    const path = getCsvRelPath(tableName);
+    return path.endsWith('.csv')
+      ? `https://github.com/ModelEarth/trade-data/blob/main/${path}`
+      : `https://github.com/ModelEarth/trade-data/tree/main/${path}`;
+  }
+
+  // Raw file URL for a table's CSV, suitable for direct fetch/analysis
+  // (e.g. the projects page's "Custom" list option).
+  function getRawCsvLink(tableName) {
+    return `https://raw.githubusercontent.com/ModelEarth/trade-data/main/${getCsvRelPath(tableName)}`;
+  }
 
   // ---- Insert Data button ----
   const btnInsert = document.getElementById('btnInsertData');
@@ -257,14 +422,60 @@ waitForLocalsiteJs();
   });
 
   // ---- Schema diagram ----
+  // Live row counts (and the three-dot menu) are added once this resolves,
+  // so the diagram itself doesn't wait on the network round trip to draw.
   function loadSchemaDiagram() {
+    const spinner = document.getElementById('schemaPanelSpinner');
+    if (spinner) spinner.style.display = 'block';
     fetch(RUST_API + '/db/industry-schema')
       .then(r => r.json())
       .then(data => renderSchemaDiagram(data))
-      .catch(() => renderSchemaDiagram(null));
+      .catch(() => renderSchemaDiagram(null))
+      .finally(() => { if (spinner) spinner.style.display = 'none'; });
   }
 
-  function renderSchemaDiagram(data) {
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // Row count badge + three-dot menu toggle for one table box (added in a
+  // follow-up pass so the initial diagram doesn't wait on these).
+  function addTableExtras(g, name, rowCount, boxW, countKnown) {
+    boxW = boxW || 190;
+    if (rowCount > 0 || countKnown) {
+      const badge = document.createElementNS(NS, 'text');
+      badge.setAttribute('x', boxW - 20); badge.setAttribute('y', 18);
+      badge.setAttribute('text-anchor', 'end');
+      badge.setAttribute('font-size', '11');
+      badge.setAttribute('fill', 'rgba(255,255,255,0.85)');
+      badge.setAttribute('data-drag-handle', '1');
+      badge.style.cursor = 'grab';
+      badge.textContent = rowCount.toLocaleString() + ' rows';
+      g.appendChild(badge);
+    }
+
+    const menuGroup = document.createElementNS(NS, 'g');
+    menuGroup.setAttribute('data-menu-toggle', '1');
+    menuGroup.setAttribute('data-table', name);
+    menuGroup.style.cursor = 'pointer';
+
+    const menuHit = document.createElementNS(NS, 'rect');
+    menuHit.setAttribute('x', boxW - 26); menuHit.setAttribute('y', 2);
+    menuHit.setAttribute('width', 26); menuHit.setAttribute('height', 26);
+    menuHit.setAttribute('fill', 'transparent');
+    menuGroup.appendChild(menuHit);
+
+    const menuBtn = document.createElementNS(NS, 'text');
+    menuBtn.setAttribute('x', boxW - 6); menuBtn.setAttribute('y', 18);
+    menuBtn.setAttribute('text-anchor', 'end');
+    menuBtn.setAttribute('font-size', '13');
+    menuBtn.setAttribute('font-weight', 'bold');
+    menuBtn.setAttribute('fill', '#fff');
+    menuBtn.textContent = '⋮';
+    menuGroup.appendChild(menuBtn);
+
+    g.appendChild(menuGroup);
+  }
+
+  function renderSchemaDiagram(data, deferExtras) {
     document.getElementById('schemaLoading').style.display = 'none';
     const svg = document.getElementById('schema-svg');
     svg.style.display = '';
@@ -280,6 +491,7 @@ waitForLocalsiteJs();
 
     const BOX_W = 190, BOX_H_BASE = 28, ROW_H = 18;
     const tables = (data && data.tables) ? data.tables : {};
+    const isLive = !!(data && data.tables);
     const staticSchema = getStaticSchema();
 
     // Relationships: [from, to, label]
@@ -305,8 +517,6 @@ waitForLocalsiteJs();
     const canvasW = Math.max(svg.parentElement.clientWidth || 0, 750);
     svg.setAttribute('viewBox', `0 0 ${canvasW} ${maxY + 20}`);
     svg.setAttribute('height', maxY + 20);
-
-    const NS = 'http://www.w3.org/2000/svg';
 
     // Arrow marker
     const defs = document.createElementNS(NS, 'defs');
@@ -370,6 +580,23 @@ waitForLocalsiteJs();
       const cols = info.columns ? info.columns : (staticSchema[name] || []);
       const exists = info.exists !== false;
       const rowCount = info.row_count || 0;
+      // count_known: true once a real (possibly zero) count came back from
+      // pg_stat_user_tables. exists-but-!countKnown means the table is there
+      // but its row count couldn't be confirmed — distinct from a table that
+      // was actually measured and found empty.
+      const countKnown = isLive ? info.count_known === true : false;
+      const unconfirmed = isLive && exists && !countKnown;
+
+      // Box color state: dark grey while the live schema hasn't loaded yet
+      // (nothing confirmed either way), light grey once we know for certain
+      // a table doesn't exist, amber when it exists but its count is
+      // unconfirmed, green once the count is confirmed (0 or more).
+      let fill, stroke, headerColor;
+      if (!isLive)          { fill = '#E5E7EB'; stroke = '#9CA3AF'; headerColor = '#4B5563'; }
+      else if (!exists)     { fill = '#F9FAFB'; stroke = '#D1D5DB'; headerColor = '#6B7280'; }
+      else if (unconfirmed) { fill = '#FFFBEB'; stroke = '#F59E0B'; headerColor = '#F59E0B'; }
+      else                  { fill = '#F0FDF4'; stroke = '#10B981'; headerColor = '#10B981'; }
+
       const boxH = boxHeights[name];
 
       const g = document.createElementNS(NS, 'g');
@@ -390,9 +617,9 @@ waitForLocalsiteJs();
       rect.setAttribute('x', 0); rect.setAttribute('y', 0);
       rect.setAttribute('width', BOX_W); rect.setAttribute('height', boxH);
       rect.setAttribute('rx', '6'); rect.setAttribute('ry', '6');
-      rect.setAttribute('fill', exists ? '#F0FDF4' : '#F9FAFB');
-      rect.setAttribute('stroke', exists ? '#10B981' : '#D1D5DB');
-      rect.setAttribute('stroke-width', exists ? '2' : '1.5');
+      rect.setAttribute('fill', fill);
+      rect.setAttribute('stroke', stroke);
+      rect.setAttribute('stroke-width', (isLive && !exists) ? '1.5' : '2');
       g.appendChild(rect);
 
       // Header bar (drag handle)
@@ -400,7 +627,7 @@ waitForLocalsiteJs();
       hdr.setAttribute('x', 0); hdr.setAttribute('y', 0);
       hdr.setAttribute('width', BOX_W); hdr.setAttribute('height', BOX_H_BASE);
       hdr.setAttribute('rx', '6'); hdr.setAttribute('ry', '6');
-      hdr.setAttribute('fill', exists ? '#10B981' : '#6B7280');
+      hdr.setAttribute('fill', headerColor);
       hdr.setAttribute('data-drag-handle', '1');
       hdr.style.cursor = 'grab';
       g.appendChild(hdr);
@@ -409,7 +636,7 @@ waitForLocalsiteJs();
       const hdr2 = document.createElementNS(NS, 'rect');
       hdr2.setAttribute('x', 0); hdr2.setAttribute('y', BOX_H_BASE - 6);
       hdr2.setAttribute('width', BOX_W); hdr2.setAttribute('height', 6);
-      hdr2.setAttribute('fill', exists ? '#10B981' : '#6B7280');
+      hdr2.setAttribute('fill', headerColor);
       hdr2.setAttribute('data-drag-handle', '1');
       hdr2.style.cursor = 'grab';
       g.appendChild(hdr2);
@@ -424,18 +651,9 @@ waitForLocalsiteJs();
       tname.textContent = name;
       g.appendChild(tname);
 
-      // Row count badge (drag handle)
-      if (rowCount > 0) {
-        const badge = document.createElementNS(NS, 'text');
-        badge.setAttribute('x', BOX_W - 6); badge.setAttribute('y', 18);
-        badge.setAttribute('text-anchor', 'end');
-        badge.setAttribute('font-size', '10');
-        badge.setAttribute('fill', 'rgba(255,255,255,0.85)');
-        badge.setAttribute('data-drag-handle', '1');
-        badge.style.cursor = 'grab';
-        badge.textContent = rowCount.toLocaleString() + ' rows';
-        g.appendChild(badge);
-      }
+      // Row count badge + three-dot menu toggle are populated in a follow-up
+      // pass (see addTableExtras) so the initial diagram paints immediately.
+      if (!deferExtras) addTableExtras(g, name, rowCount, undefined, countKnown);
 
       // Columns
       cols.forEach((col, i) => {
@@ -513,21 +731,54 @@ waitForLocalsiteJs();
     svg._dragUp   = onMouseUp;
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup',   onMouseUp);
+
+    // ---- Three-dot per-table menu ----
+    const tableMenu        = document.getElementById('schemaTableMenu');
+    const menuCsvLink      = document.getElementById('schemaMenuCsvLink');
+    const menuInsightsLink = document.getElementById('schemaMenuInsightsLink');
+    const diagramEl        = document.getElementById('schema-diagram');
+
+    svg.addEventListener('click', e => {
+      const toggle = e.target.closest('[data-menu-toggle]');
+      if (!toggle) return;
+      e.stopPropagation();
+      const tableName = toggle.getAttribute('data-table');
+      menuCsvLink.href = getCsvLink(tableName);
+      menuInsightsLink.href = '/team/projects/#list=customUrl&url='
+        + encodeURIComponent(getRawCsvLink(tableName)) + '&insights=all';
+
+      const btnRect = toggle.getBoundingClientRect();
+      const containerRect = diagramEl.getBoundingClientRect();
+      tableMenu.style.left = Math.max(0, btnRect.right - containerRect.left - 160) + 'px';
+      tableMenu.style.top  = (btnRect.bottom - containerRect.top + 4) + 'px';
+      tableMenu.style.display = 'block';
+    });
+
+    document.addEventListener('click', e => {
+      if (tableMenu.style.display === 'block' && !tableMenu.contains(e.target) && !e.target.closest('[data-menu-toggle]')) {
+        tableMenu.style.display = 'none';
+      }
+    });
   }
 
   function getStaticSchema() {
     return {
       industry: [{name:'industry_id',type:'varchar(10)'},{name:'name',type:'text'},{name:'category',type:'varchar(100)'}],
       factor:   [{name:'factor_id',type:'integer'},{name:'unit',type:'varchar(50)'},{name:'stressor',type:'text'},{name:'extension',type:'varchar(100)'}],
-      trade:    [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(10)'},{name:'country',type:'varchar(10)'}],
-      trade_factor: [{name:'id',type:'bigserial'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
+      trade:    [{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(10)'},{name:'country',type:'varchar(10)'}],
+      trade_factor: [{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
       interstate: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'year',type:'smallint'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'state_industry_code',type:'varchar(30)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
       interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'factor_id',type:'integer'},{name:'level',type:'numeric'}]
     };
   }
 
-  // Load diagram on page load
-  waitForElm('#schema-svg').then(() => loadSchemaDiagram());
+  // Load diagram on page load: paint instantly with the static schema (no
+  // network wait), then fetch live data in the background and re-render with
+  // real row counts + the three-dot menu once it arrives.
+  waitForElm('#schema-svg').then(() => {
+    renderSchemaDiagram(null, true);
+    loadSchemaDiagram();
+  });
 
 })();
 </script>

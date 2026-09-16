@@ -1,6 +1,8 @@
 TO DO: Eliminate "id" (bigserial) since tables have trade_id, factor_id, industry_id
 DONE: `interstate_factor.csv` includes `factor_id` and relates to `factor.csv` through `factor.factor_id`.
 
+[Upcoming SQL Pipeline](https://github.com/garmartirosy/pipeline) | [Database Admin (Rust)](/team/admin/sql/panel/) | [Database Admin (.NET 10 on Azure)](https://model-earth-pipeline-dnfmg3febdhvd8ag.westus2-01.azurewebsites.net/)
+
 # Primary tables: <span style="color:#aaa">trade, factor, industry</span>
 
 Table naming designed for 3rd graders. [View Report Sample](../../profile/footprint/) from [Exiobase .csv output](https://github.com/ModelEarth/trade-data/tree/main/year) and [US State Data](../../profile/footprint/)
