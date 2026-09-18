@@ -254,7 +254,7 @@ waitForLocalsiteJs();
   <div class="schema-about-panel" id="schemaAboutPanel">
     <section>
       <h4>Schema <a href="https://github.com/ModelEarth/team/blob/main/src/main.rs#L2108" target="_blank" rel="noopener noreferrer">View SQL Schema</a></h4>
-      <p>Six tables: <code>industry</code> and <code>factor</code> are shared reference tables (sector definitions, 721 environmental factors); <code>trade</code> and <code>trade_factor</code> hold international flows and their environmental coefficients per country/flow_type; <code>interstate</code> and <code>interstate_factor</code> hold US state-to-state (BEA) flows. Each database covers a single year, so these tables carry no year column. Each table's box shows column names and types.</p>
+      <p>Seven tables: <code>industry</code> and <code>factor</code> are shared reference tables (sector definitions, 721 environmental factors); <code>trade</code> and <code>trade_factor</code> hold international flows and their environmental coefficients per country/flow_type; <code>interstate</code>, <code>interstate_factor</code>, and <code>interstate_estimate</code> hold US state-to-state (BEA) flows. Each database covers a single year, so these tables carry no year column. Each table's box shows column names and types.</p>
       <p>The diagram's columns come from two sources: a hardcoded static schema (in this page's JS and mirrored in the Rust API) used as an instant preview, and the live database schema (queried from Postgres <code>information_schema.columns</code>) once the API responds. The two can drift out of sync — that's why a column can briefly appear then disappear (as happened with a leftover <code>id</code> column already removed from the live tables but not yet from the static fallbacks).</p>
     </section>
     <section>
@@ -263,8 +263,10 @@ waitForLocalsiteJs();
       <ul>
         <li><strong>Composite lookup indexes</strong> on <code>(trade_id, country, flow_type)</code> for <code>trade</code> and <code>trade_factor</code> — this is the exact compound key used to join those tables, since <code>trade_id</code> alone repeats across countries/flow types.</li>
         <li><strong>Filter-column indexes</strong> on <code>country</code>, <code>region1</code>/<code>region2</code> (<code>trade</code>), <code>state1</code>/<code>state2</code> (<code>interstate</code> — US state codes, not Exiobase regions), and <code>flow_type</code> — these back the country/region/state/flow-type selections made in this page's UI (year selects which per-year database to query, not a column filter).</li>
-        <li><strong>Foreign-key indexes</strong> on <code>factor_id</code> (both fact tables → <code>factor</code>) and <code>interstate_id</code> (self-lookup within <code>interstate_factor</code>). <code>interstate_factor</code> also keeps <code>trade_id</code> — <code>interstate_id</code>'s embedded industry is only a broad category, not the <code>industry1</code>/<code>industry2</code> pair, and <code>interstate</code> has no <code>interstate_id</code> column to join through — so <code>trade_id</code> is the only reliable path back to the originating flow's exact industry pair.</li>
+        <li><strong>Foreign-key indexes</strong> on <code>factor_id</code> (both <code>trade_factor</code> and <code>interstate_factor</code> → <code>factor</code>) and <code>interstate_id</code> (<code>interstate_factor</code> and <code>interstate_estimate</code> → <code>interstate</code>). <code>interstate</code> itself keeps <code>trade_id</code> — <code>interstate_id</code>'s embedded industry is only a broad category, not the <code>industry1</code>/<code>industry2</code> pair, so <code>trade_id</code> is the only path back to the originating international flow (its exact industry pair, <code>amount</code>, <code>country</code>, <code>flow_type</code>).</li>
         <li><strong>Natural-key dedup constraints</strong>: <code>trade</code> on <code>(region1, region2, industry1, industry2)</code> — the true identity of a flow, so the same flow pulled from two different country-perspective CSV runs (e.g. "imports to US" and "exports from Canada" both capturing the same CA→US leg) collapses into one row instead of duplicating. <code>interstate</code> on <code>(state1, state2, industry1, industry2)</code> — including same-state (<code>state1 == state2</code>) rows, which represent genuine intrastate flow, not duplicates.</li>
+        <li><strong>No <code>bigserial id</code></strong> anywhere now: each table uses its natural key as the real <code>PRIMARY KEY</code> directly — <code>trade</code>: <code>region1, region2, industry1, industry2</code>; <code>trade_factor</code>: <code>trade_id, country, flow_type, factor_id</code>; <code>interstate</code>: <code>interstate_id</code> alone; <code>interstate_factor</code>: <code>(interstate_id, factor_id)</code>; <code>interstate_estimate</code>: <code>interstate_id</code> alone.</li>
+        <li><strong><code>interstate_factor</code> vs <code>interstate_estimate</code></strong>: mutually exclusive per flow, split by whether real satellite factor data was available. <code>interstate_factor</code> holds true per-factor rows (<code>factor_id</code> always real). <code>interstate_estimate</code> holds the no-satellite fallback's leftover fields (<code>employment_impact</code>, <code>flow_type</code>) — its source data's <code>factor_id</code>/<code>coefficient</code> are fixed placeholders (<code>-1</code>/<code>1.0</code>, never recalculated), so they're excluded rather than stored as meaningless constants.</li>
       </ul>
     </section>
     <section>
@@ -353,6 +355,9 @@ waitForLocalsiteJs();
       case 'interstate':
         return `year/${year}/US/domestic/bea_trade_detail.csv`;
       case 'interstate_factor':
+      case 'interstate_estimate':
+        // Same file: whichever of the two tables got the data, depending on
+        // whether satellite factor data was available for this run.
         return `year/${year}/US/domestic/state_trade_flows.csv`;
       default:
         return `year/${year}`;
@@ -483,7 +488,7 @@ waitForLocalsiteJs();
     svg.innerHTML = '';
 
     // Mutable layout positions for each table box
-    const layout = {"industry":{"x":22,"y":243},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343}}
+    const layout = {"industry":{"x":22,"y":243},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343},"interstate_estimate":{"x":531,"y":470}}
 
     try {
       const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
@@ -501,8 +506,10 @@ waitForLocalsiteJs();
       ['trade_factor',    'trade',             'trade_id+country+flow_type'],
       ['trade_factor',    'factor',            'factor_id'],
       ['interstate',      'industry',          'industry1/2'],
-      ['interstate_factor','trade',            'trade_id (US domestic)'],
+      ['interstate',      'trade',             'trade_id (US domestic)'],
+      ['interstate_factor','interstate',       'interstate_id'],
       ['interstate_factor','factor',           'factor_id'],
+      ['interstate_estimate','interstate',     'interstate_id (1-to-0-or-1)'],
     ];
 
     // Compute box heights
@@ -767,8 +774,9 @@ waitForLocalsiteJs();
       factor:   [{name:'factor_id',type:'integer'},{name:'unit',type:'varchar(50)'},{name:'stressor',type:'text'},{name:'extension',type:'varchar(100)'}],
       trade:    [{name:'trade_id',type:'integer'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(10)'},{name:'country',type:'varchar(10)'}],
       trade_factor: [{name:'trade_id',type:'integer'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
-      interstate: [{name:'state1',type:'varchar(10)'},{name:'state2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
-      interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'state_industry_code',type:'varchar(30)'},{name:'level',type:'numeric'},{name:'flow_type',type:'varchar(20)'},{name:'employment_impact',type:'numeric'}]
+      interstate: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'state1',type:'varchar(10)'},{name:'state2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'state_industry_code',type:'varchar(30)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
+      interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'factor_id',type:'integer'},{name:'level',type:'numeric'},{name:'flow_type',type:'varchar(20)'}],
+      interstate_estimate: [{name:'interstate_id',type:'varchar(80)'},{name:'employment_impact',type:'numeric'},{name:'flow_type',type:'varchar(20)'}]
     };
   }
 

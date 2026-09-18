@@ -697,7 +697,7 @@ class StateTradeAnalyzer:
         """
         State-level export competitiveness from interstate.csv.
 
-        interstate_df columns: interstate_id, region1 (origin state), region2 (destination state),
+        interstate_df columns: interstate_id, state1 (origin state), state2 (destination state),
                                industry1, amount (M EUR)
 
         Metrics per interstate_id:
@@ -721,19 +721,19 @@ class StateTradeAnalyzer:
             s = amounts / t
             return round(float((s ** 2).sum()), 6)
 
-        state_industry_stats = interstate_df.groupby(['region1', 'industry1']).agg(
+        state_industry_stats = interstate_df.groupby(['state1', 'industry1']).agg(
             state_industry_exports_total=('amount', 'sum'),
-            state_destination_count=('region2', 'nunique'),
+            state_destination_count=('state2', 'nunique'),
         )
         state_industry_hhi = (
-            interstate_df.groupby(['region1', 'industry1'])['amount']
+            interstate_df.groupby(['state1', 'industry1'])['amount']
             .apply(_hhi)
             .rename('state_export_concentration')
         )
         state_industry_stats = state_industry_stats.join(state_industry_hhi).reset_index()
 
-        result = interstate_df[['interstate_id', 'region1', 'industry1', 'amount']].merge(
-            state_industry_stats, on=['region1', 'industry1']
+        result = interstate_df[['interstate_id', 'state1', 'industry1', 'amount']].merge(
+            state_industry_stats, on=['state1', 'industry1']
         )
         result['state_destination_share'] = (result['amount'] / result['state_industry_exports_total']).round(6)
         result['state_export_intensity'] = (result['state_industry_exports_total'] / total).round(6)
@@ -741,14 +741,14 @@ class StateTradeAnalyzer:
 
         out = result[['interstate_id', 'state_industry_exports_total', 'state_destination_share',
                       'state_export_intensity', 'state_destination_count', 'state_export_concentration']]
-        print(f"      ✅ State export competitiveness: {len(out)} rows, {interstate_df['region1'].nunique()} states")
+        print(f"      ✅ State export competitiveness: {len(out)} rows, {interstate_df['state1'].nunique()} states")
         return out
 
     def analyze_import_dependency(self, interstate_df):
         """
         State-level import dependency from interstate.csv.
 
-        Treats inbound interstate flows (region2 = destination state) as state imports.
+        Treats inbound interstate flows (state2 = destination state) as state imports.
 
         Metrics per interstate_id:
           state_industry_imports_total : M EUR received by this state+industry from all origin states
@@ -771,19 +771,19 @@ class StateTradeAnalyzer:
             s = amounts / t
             return round(float((s ** 2).sum()), 6)
 
-        state_industry_stats = interstate_df.groupby(['region2', 'industry2']).agg(
+        state_industry_stats = interstate_df.groupby(['state2', 'industry2']).agg(
             state_industry_imports_total=('amount', 'sum'),
-            state_supplier_count=('region1', 'nunique'),
+            state_supplier_count=('state1', 'nunique'),
         )
         state_industry_hhi = (
-            interstate_df.groupby(['region2', 'industry2'])['amount']
+            interstate_df.groupby(['state2', 'industry2'])['amount']
             .apply(_hhi)
             .rename('state_import_concentration')
         )
         state_industry_stats = state_industry_stats.join(state_industry_hhi).reset_index()
 
-        result = interstate_df[['interstate_id', 'region2', 'industry2', 'amount']].merge(
-            state_industry_stats, on=['region2', 'industry2']
+        result = interstate_df[['interstate_id', 'state2', 'industry2', 'amount']].merge(
+            state_industry_stats, on=['state2', 'industry2']
         )
         result['state_source_share'] = (result['amount'] / result['state_industry_imports_total']).round(6)
         result['state_import_intensity'] = (result['state_industry_imports_total'] / total).round(6)
@@ -791,7 +791,7 @@ class StateTradeAnalyzer:
 
         out = result[['interstate_id', 'state_industry_imports_total', 'state_source_share',
                       'state_import_intensity', 'state_supplier_count', 'state_import_concentration']]
-        print(f"      ✅ State import dependency: {len(out)} rows, {interstate_df['region2'].nunique()} states")
+        print(f"      ✅ State import dependency: {len(out)} rows, {interstate_df['state2'].nunique()} states")
         return out
     
     def create_state_reference_data(self, output_path):

@@ -465,52 +465,6 @@ class USBEATradeFlow:
             ]
         ]
     
-    def _create_interstate_csvfiles(self):
-        """Create enhanced trade detail with US-BEA data integration"""
-        print("  📝 Creating US-BEA trade detail integration...")
-        
-        # Update config for current tradeflow
-        original_tradeflow = self.config['TRADEFLOW']
-        self.config['TRADEFLOW'] = self.current_tradeflow
-        
-        try:
-            # Load base trade data
-            trade_file_str = get_file_path(self.config, 'industryflow')
-            trade_file = Path(trade_file_str)  # Convert to Path object
-            
-            if not trade_file.exists():
-                print(f"    ⚠️ Base trade file not found: {trade_file}")
-                return
-                
-            base_trade = pd.read_csv(trade_file)
-            
-            # Create enhanced trade detail table
-            enhanced_detail = base_trade.copy()
-            
-            # Add US-BEA-specific enhancements
-            if self.current_tradeflow == 'imports' and hasattr(self, 'bea_imports_data'):
-                enhanced_detail = self._merge_bea_imports(enhanced_detail)
-            elif self.current_tradeflow == 'exports' and hasattr(self, 'bea_exports_data'):
-                enhanced_detail = self._merge_bea_exports(enhanced_detail)
-            elif self.current_tradeflow == 'domestic' and hasattr(self, 'bea_domestic_data'):
-                enhanced_detail = self._merge_bea_domestic(enhanced_detail)
-            
-            # Rename trade_id → interstate_id as the primary key for the interstate table
-            if 'trade_id' in enhanced_detail.columns:
-                enhanced_detail = enhanced_detail.rename(columns={'trade_id': 'interstate_id'})
-
-            # Save enhanced detail
-            output_file = trade_file.parent / 'interstate.csv'
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            enhanced_detail.to_csv(output_file, index=False)
-            print(f"    ✅ Created interstate.csv: {output_file}")
-            
-        except Exception as e:
-            print(f"    ❌ Error creating BEA trade detail: {e}")
-        finally:
-            # Restore original config
-            self.config['TRADEFLOW'] = original_tradeflow
-    
     def _merge_bea_imports(self, base_trade):
         """Merge US-BEA imports data with base trade"""
         enhanced = base_trade.copy()
@@ -713,62 +667,74 @@ class USBEATradeFlow:
                 use_partial = self.config['PROCESSING'].get('use_partial_factors_interstate', True)
                 partial_limit = self.config['PROCESSING'].get('partial_factor_limit_interstate', 50)
 
-                if has_satellite and '_industry1' in state_flows.columns:
-                    # Build unique interstate rows
-                    unique_pairs = (
-                        state_flows[['interstate_id', 'trade_id', '_origin_state', '_destination_state',
-                                     '_industry1', '_industry2', 'state_industry_code','level', 'employment_impact']]
-                        .drop_duplicates(subset=['interstate_id'])
-                        .reset_index(drop=True)
-                    )
+                # Build interstate.csv the same way whether satellite factor
+                # data is available or not — amount/industry1/industry2/
+                # commodity_code shouldn't depend on whether the per-factor
+                # breakdown can be computed. Only the per-row extras split
+                # off: real per-factor rows go to interstate_factor.csv
+                # (has_satellite), leftover estimate-only fields (a placeholder
+                # coefficient/factor_id we never trust) go to
+                # interstate_estimate.csv (no satellite data available).
+                unique_pairs = (
+                    state_flows[['interstate_id', 'trade_id', '_origin_state', '_destination_state',
+                                 '_industry1', '_industry2', 'state_industry_code', 'level',
+                                 'employment_impact', 'flow_type']]
+                    .drop_duplicates(subset=['interstate_id'])
+                    .reset_index(drop=True)
+                )
 
-                    # Build interstate.csv with state-pair rows and BEA columns merged in
-                    interstate_df = pd.DataFrame({
-                        'interstate_id': unique_pairs['interstate_id'],
-                        'trade_id':      unique_pairs['trade_id'],
-                        'year':          self.config['YEAR'],
-                        'region1':       unique_pairs['_origin_state'],
-                        'region2':       unique_pairs['_destination_state'],
-                        'industry1':     unique_pairs['_industry1'],
-                        'industry2':     unique_pairs['_industry2'],
-                        'state_industry_code': unique_pairs['state_industry_code'],
-                        'amount':        unique_pairs['level'],
-                        'employment_impact': unique_pairs['employment_impact'],
-                    })
+                # Build interstate.csv with state-pair rows and BEA columns merged in
+                interstate_df = pd.DataFrame({
+                    'interstate_id': unique_pairs['interstate_id'],
+                    'trade_id':      unique_pairs['trade_id'],
+                    'year':          self.config['YEAR'],
+                    'state1':        unique_pairs['_origin_state'],
+                    'state2':        unique_pairs['_destination_state'],
+                    'industry1':     unique_pairs['_industry1'],
+                    'industry2':     unique_pairs['_industry2'],
+                    'state_industry_code': unique_pairs['state_industry_code'],
+                    'amount':        unique_pairs['level'],
+                    'employment_impact': unique_pairs['employment_impact'],
+                })
 
-                    # merge BEA domestic columns using concordance
-                    interstate_df = self._merge_bea_domestic(interstate_df)
+                # merge BEA domestic columns using concordance
+                interstate_df = self._merge_bea_domestic(interstate_df)
 
-                    impact_input = interstate_df[[
-                        'region1',
+                impact_input = interstate_df[[
+                    'state1',
+                    'state_industry_code',
+                    'amount',
+                    'employment_impact',
+                    'economic_multiplier'
+                ]].rename(columns={'state1': '_origin_state'}).copy()
+
+                state_impacts = self.state_analyzer.calculate_state_industry_impacts(impact_input)
+
+                interstate_estimate_df = interstate_df[['interstate_id', 'employment_impact']].merge(
+                    unique_pairs[['interstate_id', 'flow_type']], on='interstate_id'
+                )
+
+                interstate_df = interstate_df[
+                    [
+                        'interstate_id',
+                        'trade_id',
+                        'year',
+                        'state1',
+                        'state2',
+                        'industry1',
+                        'industry2',
                         'state_industry_code',
                         'amount',
-                        'employment_impact',
-                        'economic_multiplier'
-                    ]].rename(columns={'region1': '_origin_state'}).copy()
-
-                    state_impacts = self.state_analyzer.calculate_state_industry_impacts(impact_input)
-
-                    interstate_df = interstate_df[
-                        [
-                            'interstate_id',
-                            'trade_id',
-                            'year',
-                            'region1',
-                            'region2',
-                            'industry1',
-                            'industry2',
-                            'state_industry_code',
-                            'amount',
-                            'commodity_code',
-                            'industry_code',
-                            'economic_multiplier',
-                        ]
+                        'commodity_code',
+                        'industry_code',
+                        'economic_multiplier',
                     ]
+                ]
 
-                    interstate_df.to_csv(output_path / 'interstate.csv', index=False)
-                    print(f"    ✅ Created interstate.csv ({len(interstate_df)} state-pair rows)")
+                interstate_df.to_csv(output_path / 'interstate.csv', index=False)
+                print(f"    ✅ Created interstate.csv ({len(interstate_df)} state-pair rows)")
 
+                if has_satellite and '_industry1' in state_flows.columns:
                     # Round: 3 decimals for water/air_emissions, 0 for other extensions
                     factors_ref_path = Path(get_reference_file_path(self.config, 'factors'))
                     if not factors_ref_path.exists():
@@ -796,27 +762,13 @@ class USBEATradeFlow:
                     )
                     print(f"    ✅ Created interstate_factor.csv ({factor_count} rows, {partial_limit} Selected Factors)")
                 else:
-                    # No satellite data — build state impacts before dropping internal cols
-                    impact_input = state_flows[[
-                        '_origin_state',
-                        'state_industry_code',
-                        'level',
-                        'employment_impact',
-                    ]].copy()
-
-                    impact_input['economic_multiplier'] = 1.0
-
-                    state_impacts = self.state_analyzer.calculate_state_industry_impacts(
-                        impact_input
-                    )
-
-                    # No satellite data — drop internal cols and save interstate_factor as-is
-                    internal_cols = ['_origin_state', '_destination_state', '_industry1']
-                    state_flows_out = state_flows.drop(
-                        columns=[c for c in internal_cols if c in state_flows.columns]
-                    )
-                    state_flows_out.to_csv(output_path / 'interstate_factor.csv', index=False)
-                    print(f"    ✅ Created interstate_factor.csv ({len(state_flows_out)} rows)")
+                    # No satellite data: no real per-factor breakdown is
+                    # possible, so there's no interstate_factor.csv this run —
+                    # only the interstate_estimate.csv leftovers (factor_id/
+                    # coefficient in the source data are fixed placeholders
+                    # -1/1.0, not real per-factor values, so they're excluded).
+                    interstate_estimate_df.to_csv(output_path / 'interstate_estimate.csv', index=False)
+                    print(f"    ✅ Created interstate_estimate.csv ({len(interstate_estimate_df)} rows)")
 
                 state_impacts.to_csv(output_path / 'state_industry_impacts.csv', index=False)
                 print(f"    Created US state domestic flow analysis")
@@ -860,7 +812,7 @@ class USBEATradeFlow:
         return row_count
     
     def _analyze_state_export_competitiveness(self):
-        """State export competitiveness from domestic interstate.csv (region1=origin state)."""
+        """State export competitiveness from domestic interstate.csv (state1=origin state)."""
         print("  Analyzing US state export competitiveness from interstate data...")
 
         original_tradeflow = self.config['TRADEFLOW']
@@ -888,7 +840,7 @@ class USBEATradeFlow:
             self.config['TRADEFLOW'] = original_tradeflow
 
     def _analyze_import_dependency(self):
-        """State import dependency from domestic interstate.csv (region2=destination state)."""
+        """State import dependency from domestic interstate.csv (state2=destination state)."""
         print("  Analyzing US state import dependency from interstate data...")
 
         original_tradeflow = self.config['TRADEFLOW']
