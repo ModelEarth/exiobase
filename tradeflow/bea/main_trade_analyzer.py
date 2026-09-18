@@ -366,13 +366,16 @@ class StateTradeAnalyzer:
 
         industry = industry1_cat
 
-        # First collect all candidate state-pair shares
+        # First collect all candidate state-pair shares. Same-state pairs
+        # (origin == destination) are kept, not skipped: excluding them and
+        # then renormalizing the rest to sum to 1.0 would silently reallocate
+        # genuine intra-state consumption onto cross-state pairs, inflating
+        # them. Keeping same-state pairs in the normalization means the
+        # total across all resulting rows still equals trade.amount, but now
+        # correctly split between real interstate and intrastate flow.
         state_pairs = []
         for origin_state in producing_states:
             for dest_state in consuming_states:
-                if origin_state == dest_state:
-                    continue
-
                 raw_share = self._calculate_state_flow_share(
                     origin_state, dest_state, industry1_cat, industry2_cat, bea_data
                 )
@@ -402,7 +405,7 @@ class StateTradeAnalyzer:
                 'coefficient': 1.0,
                 'state_industry_code': industry,
                 'level': level,
-                'flow_type': 'inter_state',
+                'flow_type': 'intra_state' if origin_state == dest_state else 'inter_state',
                 'employment_impact': 0.0,
                 '_origin_state': origin_state,
                 '_destination_state': dest_state,

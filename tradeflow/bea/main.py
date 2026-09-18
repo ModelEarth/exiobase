@@ -831,14 +831,14 @@ class USBEATradeFlow:
     def _write_interstate_factor_file(self, state_flows, output_file, ext_by_factor, factor_limit=None):
         """Stream interstate factor rows without materializing the full factor table."""
         row_count = 0
-        factor_cols = ['interstate_id', 'factor_id', 'level']
+        factor_cols = ['interstate_id', 'factor_id', 'level', 'flow_type']
 
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(factor_cols)
 
-            for interstate_id, industry_id, amount in state_flows[
-                ['interstate_id', '_industry1', 'level']
+            for interstate_id, industry_id, amount, flow_type in state_flows[
+                ['interstate_id', '_industry1', 'level', 'flow_type']
             ].itertuples(index=False, name=None):
                 entries = self.state_analyzer.get_satellite_factor_entries(
                     industry_id,
@@ -854,7 +854,7 @@ class USBEATradeFlow:
                     else:
                         level_out = int(round(level))
 
-                    writer.writerow([interstate_id, factor_id, level_out])
+                    writer.writerow([interstate_id, factor_id, level_out, flow_type])
                     row_count += 1
 
         return row_count
