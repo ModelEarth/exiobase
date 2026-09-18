@@ -6,18 +6,35 @@ The US-BEA data integration here combines Exiobase MRIO data with US Bureau of E
 
 ### BEA Factor Aggregation
 
-The BEA interstate workflow now assigns real Exiobase factor IDs to state-to-state flows by 
-loading the Exiobase satellite S matrix with `pymrio`, mapping stressors to `factor.csv`, and 
-writing selected factor levels to `interstate_factor.csv`.
+The BEA interstate workflow assigns real Exiobase factor IDs to state-to-state flows by
+loading the Exiobase satellite M matrix (total — direct + upstream supply chain, via the
+Leontief inverse) with `pymrio`, and writing aggregated factor levels to
+`interstate_factor.csv`. Using M rather than the direct-only S matrix matches EPA USEEIO's
+[import_emission_factors](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors)
+methodology — S alone would omit everything embodied in a sector's own inputs.
 
-EPA's published USEEIO import-factor outputs are much smaller because they map raw MRIO factors 
-into reduced reporting groups and then aggregate by reporting dimensions such as Region, Sector, 
-and Flow metadata before writing CSVs. Filtering to greenhouse-gas factors alone is not enough 
-to match EPA-sized outputs; aggregation is the major reduction step.
+The default `trade_factor.csv`/`interstate_factor.csv` files no longer rank raw stressors by
+coefficient magnitude and keep the top N — they aggregate (sum) raw stressors into a small,
+fixed set of flows, the same way EPA does it. See [EPA import factor
+reduction](#epa-import-factor-reduction) and [Aggregated flows](#aggregated-flows) below.
+`trade_factor_lg.csv`/`interstate_factor_lg.csv` still carry every raw, unaggregated stressor
+(all 721) for anyone who wants the full detail.
 
-For additional details, see the detailed notes in [interstate_factor](#interstate_factor), [50 
-Selected 
-Factors](#50-selected-factors), and [EPA import factor reduction](#epa-import-factor-reduction).
+## EPA import factor reduction
+
+How our factor selection compares to EPA USEEIO's [import_emission_factors](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) (`generate_import_factors.py`, `exiobase_helpers.py`):
+
+**Matches EPA's methodology:**
+- **M matrix, not S.** EPA's `clean_exiobase_M_matrix()` builds import factors from Exiobase's `M` (total requirements — direct plus everything embodied in a sector's own upstream inputs, via the Leontief inverse), never the direct-only `S` matrix. Our pipeline (`trade.py`, `bea/main_trade_analyzer.py`) does the same.
+- **Aggregation of a curated flow list, not magnitude ranking.** EPA's `clean_exiobase_M_matrix()` splits each raw Exiobase stressor name on its first `" - "` to get a substance prefix, maps that prefix through a small curated dict, drops anything that doesn't map, then `groupby(flow).sum()`. For `air_emissions`, we copy EPA's own mapping verbatim (see `exiobase_factors.py`, sourced from [`mrio_config.yml`](https://github.com/USEPA/USEEIO/blob/master/import_emission_factors/data/mrio_config.yml)) and do the identical split → map → filter → sum: `CO2`→Carbon dioxide, `CH4`→Methane, `N2O`→Nitrous oxide, `SF6`→Sulfur hexafluoride, and `HFC`/`PFC` both → "HFCs and PFCs, unspecified" (5 output flows from 6 raw prefixes). This replaced an earlier "top 50 (or top 120) raw stressors ranked by `|coefficient|`" selection, which picked different substances than EPA's GHG list and never aggregated multiple raw rows into one — that scheme could never reproduce EPA's numbers no matter what N was chosen, independent of the M-vs-S question above.
+- **FEDEFL flow identities.** Both use the [Federal LCA Commons Elementary Flow List](https://github.com/USEPA/fedelemflowlist) for environmental flow metadata (see `main_fedefl_integration.py`).
+
+**Differs from EPA's methodology, by design (different output goal):**
+- **Aggregation vs. row-level detail.** EPA's published import factors are one row per (USEEIO sector, region, flow) — countries are pre-aggregated into 7 regions weighted by their contribution to US imports (`generate_import_shares.py`), and each region/sector pair carries one factor value per flow. We instead keep row-level `trade_id`/`interstate_id` granularity — one row per actual trade flow, aggregated only across raw stressors within a flow, not across trade flows or countries/regions. Aggregating further to EPA-style regional summaries is a `GROUP BY` query away rather than baked into the pipeline.
+- **Currency.** EPA converts EUR → USD using dated exchange rates (`exiobase_adjust_currency()`, via `CurrencyConverter`). `trade.amount`/`interstate.amount` are still in Euros here — a known open gap (see the TO DO above and in [../README.md](../README.md#schema-notes-ids-dedup-keys-and-one-database-per-year)), not yet implemented.
+- **Country/region correspondence.** EPA uses formal MRIO-to-USEEIO country and commodity concordance files (`concordances/`) to map Exiobase's regions and sectors onto USEEIO's. We map Exiobase sectors to our own 5-character `industry_id` (`create_sector_mapping.py`) rather than USEEIO's sector codes, since our tables aren't scoped to the USEEIO model.
+
+**Not yet matched — no EPA source found (open TODO):** EPA's own published import-factor product only covers these 5 GHG flows; it doesn't include employment, energy, land, material, or water at all, so there's no equivalent curated list to copy for those five extensions. Until an external source (EPA, USEEIO, or otherwise) defines one, each of those extensions is reduced to a single placeholder flow — every raw stressor in the extension, summed — dimensionally consistent (each extension already uses one unit uniformly, per the Units table above) but not a considered, substance-specific selection like the GHGs are. See `exiobase_factors.py`'s module docstring and `EXTENSION_PLACEHOLDER_*` for where to plug in a real breakdown once one is found.
 
 Related pages:
 - [US interstate trade map](../../../profile/trade/map/state.html)
@@ -41,8 +58,11 @@ Each factor level is one of 6 units. (These apply to all 721 factors.)
 - material (kilotonnes)
 - water (Mm³ million cubic metres)
 
-We use 50 of 721 factors per interstate trade.
-(120 factors resulted in a 5 GB interstate_factor file.)
+The default files aggregate down to 5 GHG flows for `air_emissions` plus one placeholder flow per
+other extension (10 total per industry) instead of raw per-stressor rows — see [Aggregated
+flows](#aggregated-flows) and [EPA import factor reduction](#epa-import-factor-reduction).
+(An earlier top-120-by-magnitude scheme produced a 5 GB `interstate_factor.csv`; the aggregated
+scheme is far smaller since it's 10 rows per industry rather than up to 120 or 721.)
 
 We don't save a "coefficient" column since it can be derived from `trade_factor.level / 
 trade.amount`, and from `interstate_factor.level / interstate.amount`.
@@ -73,7 +93,8 @@ Before running, ensure the following exist:
 - `../../trade-data/year/{year}/US/domestic/trade.csv` — run `../trade.py` for domestic flow, or pass `--force-regen`
 - `../../trade-data/year/{year}/US/imports/trade.csv` — run `../trade.py` for imports flow
 - `../../trade-data/year/{year}/US/exports/trade.csv` — run `../trade.py` for exports flow
-- `BEA_API_KEY` in `webroot/.env` (or pass via `--bea-key`) — optional; without it, `commodity_code`, `industry_code`, and `economic_multiplier` fall back to empty/default values
+- `BEA_API_KEY` — optional; without it, `commodity_code`, `industry_code`, and `economic_multiplier` fall back to empty/default values. Resolved from a local environment file if present, else `webroot/docker/.env` or `webroot/.env` (or pass via `--bea-key`).
+- `trade-data/concordance/*.csv` — fetched automatically from [ModelEarth/trade-data](https://github.com/ModelEarth/trade-data/tree/main/concordance) on first run if not already present locally; the run stops with a clear message if a needed file isn't found there either, rather than silently falling back.
 
 ### Primary Module: main.py
 
@@ -82,18 +103,19 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 **Uses:**
 - `year/{year}/US/{tradeflow}/trade.csv` — pre-generated by `../trade.py`; skipped if already exists (use `--force-regen` to override)
 - `year/{year}/industry.csv` and `year/{year}/factor.csv` — shared reference files from parent tradeflow directory
-- `webroot/.env` — reads `BEA_API_KEY`
+- A local environment file if present, else `webroot/docker/.env` or `webroot/.env` — reads `BEA_API_KEY`
 - `../config.yaml` — year, country, tradeflow settings via `../config_loader.py`
-- `exiobase_data/IOT_{year}_pxp.zip` — loaded directly via pymrio to extract the S matrix for `factor_id` assignment in `interstate_factor.csv`
+- `exiobase_data/IOT_{year}_pxp.zip` — loaded directly via pymrio to extract the M matrix (total multipliers) for `factor_id` assignment in `interstate_factor.csv`
 
 **Generates:**
-- `year/{year}/US/domestic/interstate.csv` — BEA-enhanced state-to-state trade detail
-- `year/{year}/US/domestic/interstate_factor.csv` — state-level flows with `factor_id` 
+- `year/{year}/US/domestic/interstate.csv` — BEA-enhanced state-to-state trade detail; always produced, satellite data available or not
+- `year/{year}/US/domestic/interstate_factor.csv` — real per-factor state-level flows (satellite data available)
 - `year/{year}/US/domestic/interstate_factor_lg.csv` — same as above with all 721 factors (generated when `use_partial_factors_interstate: false` in `config.yaml`)
+- `year/{year}/US/domestic/interstate_estimate.csv` — no-satellite-fallback leftover fields (satellite data unavailable); mutually exclusive with `interstate_factor.csv` per flow
 - `year/{year}/US/domestic/trade_price_indices.csv` — trade price indices (currently empty; see [PLAN.md](PLAN.md))
 - `year/{year}/US/bea-report.md` — validation and processing summary report
 
-**Note:** interstate factor coefficient (from Exiobase S matrix) is not stored. coefficient can be derived by trade.amount divided by trade_factor.level
+**Note:** interstate factor coefficient (from Exiobase's M matrix — total, direct + upstream) is not stored. coefficient can be derived by trade.amount divided by trade_factor.level
 
 
 ```bash
@@ -116,7 +138,7 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 
 From March 27, 2026 - AM
 
-- interstate_factor.csv — 68,465,474 rows, 120 Selected Factors (filtered down
+- interstate_factor.csv — 68,465,474 rows, 120 Selected Factors (old top-N-by-magnitude scheme, since replaced by aggregation — filtered down
  from 75,369,200 full-factor records)
 - Domestic processing took ~2.5 hours (9,234 seconds) - not yet confirmed, driven by the satellite disaggregation generating 75M state-to-state flow records before filtering to 68M
 - Imports and exports completed quickly (56s and 1,007s) using existing base data
@@ -157,8 +179,10 @@ trade_id, bea_commodity_code, bea_industry_code, trade_balance, import_value, ex
 -->
 
 **columns**
-interstate_id, year, region1 (NY), region2 (CA), industry1, industry2, amount,
+interstate_id, trade_id, state1 (NY), state2 (CA), industry1, industry2, state_industry_code, amount,
 commodity_code, industry_code, economic_multiplier
+
+`interstate_id` is a composite string key (`{year}-{trade_id}-US-{state1}-US-{state2}-{state_industry_code}`), not a surrogate integer — it's the `PRIMARY KEY` of the `interstate` table and the join target for `interstate_factor`/`interstate_estimate`, since one `trade_id` fans out to 150+ state-pair rows. `trade_id` is kept on `interstate` (not on `interstate_factor`/`interstate_estimate`) as the only path back to the originating international `trade` row (`trade.amount`, `trade.country`, `trade.flow_type`) — navigate as `interstate_factor → interstate → trade`. There is no `year` column — one database per year makes it redundant.
 
 **interstate.amount** is in million Euros (M EUR), consistent with `trade.amount` — both are sourced from the Exiobase Z matrix.
 
@@ -192,25 +216,29 @@ In some SQL installs, we'll place state data in the "trade" table with multi-cou
 
 
 #### interstate_factor - rename from [state_trade_flows.csv](https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/year/2019/US/domestic/state_trade_flows.csv) (State-Level Analysis)
-interstate_id, factor_id, level
+interstate_id, factor_id, level, flow_type
 
-`origin_state` and `destination_state` are no longer separate columns here — they are encoded in `interstate_id` and available via `interstate.region1` / `interstate.region2`.
+Real per-factor rows only — generated when Exiobase satellite data is available. `origin_state` and `destination_state` are not separate columns here — they are encoded in `interstate_id` and available via `interstate.state1` / `interstate.state2`.
 
 **Column notes:**
-- `interstate_factor.level` = `interstate.amount × coefficient`, rounded to 2 decimals. `coefficient` is not stored separately — it is derivable as `level / interstate.amount`. Note: back-deriving coefficient is approximate since `level` is rounded to 2dp. The column is named `level` rather than `levelX` to avoid implying a monetary unit — it is a physical quantity (kg, persons, TJ, etc.).
-- These three fields are omitted from `interstate_factor` (available via joins to `interstate` and `trade`):
-  - `state_industry_code` — broad industry category (services, manufacturing, etc.)
-  - `flow_type` — always `inter_state`
-  - `employment_impact` — always `0` (employment is captured as Exiobase factor rows when satellite data is loaded)
-- `interstate_factor.trade_id` is omitted — the trade relation can be navigated as `interstate_factor → interstate → trade`, where `trade.region1` and `trade.region2` are the current country and `industry1`/`industry2` values align across the tables.
-- `interstate.region1` and `interstate.region2` are state codes only (e.g. `NY`, `CA`), not prefixed with `US-`.
+- `interstate_factor.level` = `interstate.amount × coefficient`, rounded per extension (3dp for water/air_emissions, integer for others). `coefficient` is not stored separately — it is derivable as `level / interstate.amount`. The column is named `level` rather than `levelX` to avoid implying a monetary unit — it is a physical quantity (kg, persons, TJ, etc.).
+- `state_industry_code` is omitted from `interstate_factor` — available via a join to `interstate`.
+- `flow_type` is `inter_state` or `intra_state` (same-state flows are kept, not dropped — see [Schema notes](../README.md#schema-notes-ids-dedup-keys-and-one-database-per-year)).
+- `employment_impact` is not a column here — when satellite data is available, employment is captured as ordinary Exiobase employment-extension factor rows, not a separate field.
+- `interstate_factor.trade_id` is omitted — the trade relation can be navigated as `interstate_factor → interstate → trade`, where `industry1`/`industry2` values align across the tables.
+- `interstate.state1` and `interstate.state2` are state codes only (e.g. `NY`, `CA`), not prefixed with `US-`.
 
-**50 Selected Factors vs All 721 Factors:**
+#### Aggregated flows
 
-Each Exiobase sector has environmental coefficients for up to 721 stressors (air emissions, employment, energy, land, material, water). `interstate_factor.csv` keeps only the **50 Selected Factors** — the top 50 stressors ranked by absolute coefficient magnitude for each industry. This selection is performed independently per industry by loading the Exiobase S matrix, filtering entries whose absolute value meets `min_impact_threshold` (0.001), sorting descending by magnitude, and retaining the first `partial_factor_limit` (50) entries. Setting `use_partial_factors_interstate: false` in `config.yaml PROCESSING` generates the full **`interstate_factor_lg.csv`** (Large File — All 721 Factors) alongside the standard file.
+Each Exiobase sector has environmental coefficients for up to 721 raw stressors (air emissions, employment, energy, land, material, water). `interstate_factor.csv` no longer keeps a top-N slice of those raw rows — it aggregates them into a small, fixed set of flows per industry: 5 GHG flows for `air_emissions` (EPA's own curated list, see [EPA import factor reduction](#epa-import-factor-reduction)) plus one placeholder flow per other extension (employment, energy, land, material, water — pending a real curated source, see the TODO there), for up to 10 rows per industry rather than 50 or 721. Setting `use_partial_factors_interstate: false` in `config.yaml PROCESSING` additionally generates **`interstate_factor_lg.csv`** (Large File — All 721 raw, unaggregated factors) alongside the aggregated default file.
 
+See [EPA import factor reduction](#epa-import-factor-reduction) for how this selection compares to EPA's USEEIO aggregation approach.
 
-investigating if we need the rest...
+## interstate_estimate
+
+interstate_id, employment_impact, flow_type
+
+Generated instead of `interstate_factor.csv` when Exiobase satellite data is **not** available for a given run — the two files are mutually exclusive per flow (a given `interstate_id` produces rows in one or the other, never both). It carries only the no-satellite fallback's real leftover fields: `employment_impact` (from BEA regional employment/output weights, not Exiobase) and `flow_type` (`inter_state`/`intra_state`). The fallback source data's `factor_id`/`coefficient` are fixed placeholders (`-1`/`1.0`, never recalculated against real Exiobase coefficients), so they are deliberately excluded rather than stored as meaningless constants — this is also why `interstate_estimate` is a separate table from `interstate_factor` rather than a shared one with nullable factor columns: a `-1` `factor_id` isn't a valid `factor.factor_id` and would need to be filtered out on every read.
 
 ## trade_price_indices
 
@@ -290,8 +318,9 @@ year/[year]/
     │   ├── trade.csv                     # Base trade flows (pre-exists from ../trade.py)
     │   ├── trade_factor.csv              # Environmental coefficients (pre-exists)
     │   ├── interstate.csv                # BEA-enhanced state-to-state tradeflow
-    │   ├── interstate_factor.csv         # State-to-state factor (flow) level — 50 Selected Factors
+    │   ├── interstate_factor.csv         # State-to-state factor (flow) level — aggregated flows (see EPA import factor reduction)
     │   ├── interstate_factor_lg.csv      # Same, all 721 factors (use_partial_factors_interstate: false)
+    │   ├── interstate_estimate.csv       # No-satellite fallback leftovers (mutually exclusive with interstate_factor.csv)
     │   ├── state_industry_impacts.csv    # State economic impacts
     │   ├── trade_price_indices.csv       # Trade price indices (currently empty)
     │   ├── state_codes.csv               # US state reference list
@@ -346,7 +375,7 @@ Fallback values (used only with `--use-bea-placeholder` when API is unavailable)
 For domestic rows, `economic_multiplier` is populated from BEA Input-Output TableID 61 rows whose `RowDescr` is `Total industry output requirement`, matched by BEA Summary `industry_code`. Rows without a BEA multiplier match keep the fallback value `1.0`.
 
 **Uses:**
-- BEA API key from `docker/.env` or `webroot/.env` (`BEA_API_KEY=...`) or `--bea-key` argument
+- BEA API key from a local environment file if present, else `docker/.env` or `webroot/.env` (`BEA_API_KEY=...`), or `--bea-key` argument
 - `bea_cache/*.json` — cached responses from prior runs (24-hour TTL; API key excluded from cache keys)
 
 **Generates:**
@@ -375,7 +404,7 @@ State-level trade flow disaggregation, employment and output impact calculations
 - Internal state employment multipliers and specialization weights (placeholder values; intended to be replaced with live BEA regional data)
 
 **Generates:**
-- `year/[year]/US/domestic/interstate_factor.csv` — state-to-state trade flows, 50 Selected Factors
+- `year/[year]/US/domestic/interstate_factor.csv` — state-to-state trade flows, aggregated flows (see EPA import factor reduction)
   Columns: `interstate_id` (integer FK to interstate.csv), `factor_id`, `level` (2dp)
 - `year/[year]/US/domestic/interstate_factor_lg.csv` — same with all 721 factors; generated when `use_partial_factors_interstate: false` in `config.yaml`
 - `year/[year]/US/domestic/state_industry_impacts.csv` — employment and output impacts aggregated by destination region and industry

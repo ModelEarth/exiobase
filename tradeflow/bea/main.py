@@ -20,6 +20,7 @@ import time
 import argparse
 import os
 import csv
+import requests
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -83,16 +84,73 @@ class USBEATradeFlow:
         else:
             print("Optimization: Will skip existing trade.csv files")
         
+    def _try_load_local_cloud_repo_env(self):
+        """
+        Look for a repo folder near this checkout whose name starts with
+        "cloud" and that has an automation/paths.yaml file — the same file
+        that repo's own automation reads to find its env file — and, if
+        found, load whatever env file it points to. Never logs the resolved
+        path or its contents. Returns True if an env file was loaded, False
+        if no such repo/file is present (e.g. in Docker or CI), in which
+        case the caller falls back to other sources.
+        """
+        current = Path(__file__).resolve().parent
+        for _ in range(4):
+            parent = current.parent
+            if parent == current:
+                break
+            try:
+                siblings = [d for d in parent.iterdir() if d.is_dir()]
+            except OSError:
+                break
+            for sibling in siblings:
+                if sibling == current:
+                    continue
+                if not sibling.name.lower().startswith('cloud'):
+                    continue
+                paths_yaml = sibling / 'automation' / 'paths.yaml'
+                if not paths_yaml.exists():
+                    continue
+                env_file = self._resolve_env_file_from_paths_yaml(paths_yaml)
+                if env_file and env_file.exists():
+                    load_dotenv(env_file)
+                    return True
+            current = parent
+        return False
+
+    @staticmethod
+    def _resolve_env_file_from_paths_yaml(paths_yaml_path):
+        """Read the last `env_file:` line from paths.yaml and resolve it
+        relative to paths.yaml's own directory."""
+        env_line = None
+        for line in paths_yaml_path.read_text().splitlines():
+            line = line.strip()
+            if line.lower().startswith('env_file:'):
+                env_line = line
+        if env_line is None:
+            return None
+        value = env_line.split(':', 1)[1].strip().strip('"')
+        if not value:
+            return None
+        return (paths_yaml_path.parent / value).resolve()
+
     def _load_bea_api_key(self, provided_key):
         """Load BEA API key from command line, .env files, or environment.
         Returns None if not found — BEA API calls will fall back to empty DataFrames."""
         if provided_key:
             return provided_key
 
-        # Search .env files in priority order
+        if self._try_load_local_cloud_repo_env():
+            env_key = os.getenv('BEA_API_KEY')
+            if env_key:
+                print("Loaded BEA API key from local environment")
+                return env_key
+
+        # Fall back to webroot/docker/.env or webroot/.env
+        # bea/main.py -> bea -> tradeflow -> exiobase -> webroot, so webroot is parents[3]
         search_paths = [
-            Path(__file__).parents[2] / 'docker' / '.env',   # webroot/docker/.env
-            Path(__file__).parents[2] / '.env',               # webroot/.env
+            Path(__file__).parents[3] / 'docker' / '.env',   # webroot/docker/.env
+            Path(__file__).parents[3] / '.env',               # webroot/.env
         ]
         for env_path in search_paths:
             if env_path.exists():
@@ -491,6 +549,44 @@ class USBEATradeFlow:
         
         return enhanced
     
+    @staticmethod
+    def _ensure_concordance_file(concordance_dir, filename):
+        """
+        Ensure `filename` exists in the local trade-data/concordance folder,
+        fetching it from the ModelEarth/trade-data GitHub repo if that folder
+        or file isn't there yet. Raises SystemExit — not caught by the
+        `except Exception` fallback in _merge_bea_domestic, so this actually
+        stops the run — if the file isn't on GitHub either (404) or can't be
+        fetched, so a human can decide whether to proceed rather than
+        silently continuing with fallback commodity_code/industry_code/
+        economic_multiplier values.
+        """
+        local_path = concordance_dir / filename
+        if local_path.exists():
+            return local_path
+
+        concordance_dir.mkdir(parents=True, exist_ok=True)
+        url = f"https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/concordance/{filename}"
+        print(f"    Concordance file not found locally, fetching {filename} from GitHub...")
+        try:
+            resp = requests.get(url, timeout=30)
+        except requests.RequestException as e:
+            raise SystemExit(
+                f"PAUSED: could not fetch concordance file {filename} from {url}: {e}\n"
+                "Confirm with the user how to proceed before continuing."
+            ) from e
+
+        if resp.status_code == 404:
+            raise SystemExit(
+                f"PAUSED: concordance file {filename} not found in ModelEarth/trade-data at {url} (404).\n"
+                "This file is required to map commodity_code/industry_code/economic_multiplier for "
+                "interstate.csv.\nConfirm with the user how to proceed before continuing."
+            )
+        resp.raise_for_status()
+        local_path.write_bytes(resp.content)
+        print(f"    Downloaded {filename} to {local_path}")
+        return local_path
+
     def _merge_bea_domestic(self, base_trade):
         """Merge US-BEA domestic data with trade/interstate rows"""
         enhanced = base_trade.copy()
@@ -511,15 +607,15 @@ class USBEATradeFlow:
             trade_data_dir = year_dir.parent.parent
             concordance_dir = trade_data_dir / 'concordance'
 
-            exio_to_useeio_path = concordance_dir / 'exio_to_useeio2_commodity_concordance.csv'
-            useeio_internal_path = concordance_dir / 'useeio_internal_concordance.csv'
-
             if not industry_path.exists():
                 raise FileNotFoundError(f"industry.csv not found at {industry_path}")
-            if not exio_to_useeio_path.exists():
-                raise FileNotFoundError(f"exio_to_useeio2_commodity_concordance.csv not found at {exio_to_useeio_path}")
-            if not useeio_internal_path.exists():
-                raise FileNotFoundError(f"useeio_internal_concordance.csv not found at {useeio_internal_path}")
+
+            exio_to_useeio_path = self._ensure_concordance_file(
+                concordance_dir, 'exio_to_useeio2_commodity_concordance.csv'
+            )
+            useeio_internal_path = self._ensure_concordance_file(
+                concordance_dir, 'useeio_internal_concordance.csv'
+            )
 
             # Load industry.csv
             industry_df = pd.read_csv(
@@ -665,7 +761,6 @@ class USBEATradeFlow:
 
                 has_satellite = bool(getattr(self.state_analyzer, '_satellite_data', None))
                 use_partial = self.config['PROCESSING'].get('use_partial_factors_interstate', True)
-                partial_limit = self.config['PROCESSING'].get('partial_factor_limit_interstate', 50)
 
                 # Build interstate.csv the same way whether satellite factor
                 # data is available or not — amount/industry1/industry2/
@@ -687,7 +782,6 @@ class USBEATradeFlow:
                 interstate_df = pd.DataFrame({
                     'interstate_id': unique_pairs['interstate_id'],
                     'trade_id':      unique_pairs['trade_id'],
-                    'year':          self.config['YEAR'],
                     'state1':        unique_pairs['_origin_state'],
                     'state2':        unique_pairs['_destination_state'],
                     'industry1':     unique_pairs['_industry1'],
@@ -718,7 +812,6 @@ class USBEATradeFlow:
                     [
                         'interstate_id',
                         'trade_id',
-                        'year',
                         'state1',
                         'state2',
                         'industry1',
@@ -743,24 +836,26 @@ class USBEATradeFlow:
                     factors_df = pd.read_csv(factors_ref_path, usecols=['factor_id', 'extension'])
                     ext_by_factor = dict(zip(factors_df['factor_id'], factors_df['extension']))
 
-                    # Optionally generate large file (all 721 factors)
+                    # Optionally generate large file (all 721 raw factors, unaggregated)
                     if not use_partial:
                         lg_file = self.config['FILES'].get('interstate_factor_lg', 'interstate_factor_lg.csv')
                         lg_count = self._write_interstate_factor_file(
                             state_flows,
                             output_path / lg_file,
                             ext_by_factor,
-                            factor_limit=None,
+                            use_aggregate=False,
                         )
                         print(f"    ✅ Created {lg_file} ({lg_count} rows, all factors)")
 
+                    # Default file: EPA-style aggregated flows, not a top-N-by-magnitude
+                    # slice — see exiobase_factors.py.
                     factor_count = self._write_interstate_factor_file(
                         state_flows,
                         output_path / 'interstate_factor.csv',
                         ext_by_factor,
-                        factor_limit=partial_limit,
+                        use_aggregate=True,
                     )
-                    print(f"    ✅ Created interstate_factor.csv ({factor_count} rows, {partial_limit} Selected Factors)")
+                    print(f"    ✅ Created interstate_factor.csv ({factor_count} rows, aggregated flows)")
                 else:
                     # No satellite data: no real per-factor breakdown is
                     # possible, so there's no interstate_factor.csv this run —
@@ -780,8 +875,14 @@ class USBEATradeFlow:
             # Restore original config
             self.config['TRADEFLOW'] = original_tradeflow
 
-    def _write_interstate_factor_file(self, state_flows, output_file, ext_by_factor, factor_limit=None):
-        """Stream interstate factor rows without materializing the full factor table."""
+    def _write_interstate_factor_file(self, state_flows, output_file, ext_by_factor, use_aggregate=True):
+        """Stream interstate factor rows without materializing the full factor table.
+
+        use_aggregate=True (the default file): EPA-style aggregated flows
+        (get_satellite_aggregate_entries — see exiobase_factors.py).
+        use_aggregate=False (the "_lg" file): every raw per-stressor factor,
+        unaggregated (get_satellite_factor_entries).
+        """
         row_count = 0
         factor_cols = ['interstate_id', 'factor_id', 'level', 'flow_type']
 
@@ -792,10 +893,10 @@ class USBEATradeFlow:
             for interstate_id, industry_id, amount, flow_type in state_flows[
                 ['interstate_id', '_industry1', 'level', 'flow_type']
             ].itertuples(index=False, name=None):
-                entries = self.state_analyzer.get_satellite_factor_entries(
-                    industry_id,
-                    limit=factor_limit,
-                )
+                if use_aggregate:
+                    entries = self.state_analyzer.get_satellite_aggregate_entries(industry_id)
+                else:
+                    entries = self.state_analyzer.get_satellite_factor_entries(industry_id, limit=None)
 
                 for factor_id, coefficient in entries:
                     level = float(amount) * float(coefficient)

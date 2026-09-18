@@ -5,11 +5,16 @@ Provides state-level trade flow disaggregation, economic impact calculations,
 and employment multipliers for comprehensive US trade analysis.
 """
 
+import sys
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import json
 import re
+
+# Allow imports from parent tradeflow directory (exiobase_factors, etc.)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from exiobase_factors import aggregate_coefficients
 
 class StateTradeAnalyzer:
     def __init__(self, config):
@@ -210,7 +215,12 @@ class StateTradeAnalyzer:
     
     def load_exiobase_satellite(self, exiobase_zip_path):
         """
-        Load Exiobase S matrix (environmental intensity per unit output) for US sectors.
+        Load Exiobase M matrix (total — direct + upstream supply chain, via the
+        Leontief inverse — environmental multiplier per unit output) for US
+        sectors. This matches EPA USEEIO's import_emission_factors methodology
+        (see exiobase_helpers.py in https://github.com/USEPA/USEEIO/tree/master/import_emission_factors),
+        which builds import factors from M, not the direct-only S matrix — S
+        would omit everything embodied in a sector's own inputs.
         Populates self._satellite_data: dict of industry_id -> list of (factor_id, coefficient).
         Factor IDs are assigned by row position across extensions (same as factors.py).
         """
@@ -252,31 +262,41 @@ class StateTradeAnalyzer:
 
         threshold = self.config.get('PROCESSING', {}).get('min_impact_threshold', 0.001)
 
-        satellite_data = {}  # industry_id → list of (factor_id, coefficient), all factors meeting threshold
+        satellite_data = {}      # industry_id → list of (factor_id, coefficient), all raw factors meeting threshold — feeds interstate_factor_lg.csv only
+        satellite_aggregate = {}  # industry_id → list of (factor_id, coefficient), EPA-style aggregated flows — feeds the default interstate_factor.csv (see exiobase_factors.py)
 
         for ext_name in extensions:
             if hasattr(exio_model, ext_name):
                 ext = getattr(exio_model, ext_name)
-                if not hasattr(ext, 'S'):
+                if not hasattr(ext, 'M'):
                     continue
                 try:
-                    us_S = ext.S.xs('US', level='region', axis=1)
+                    us_M = ext.M.xs('US', level='region', axis=1)
                 except KeyError:
                     continue
 
-                for sector in us_S.columns:
+                for sector in us_M.columns:
                     iid = sector_to_iid.get(str(sector))
                     if not iid:
                         continue
                     entries = [
-                        (stressor_to_fid[stressor], float(us_S.loc[stressor, sector]))
-                        for stressor in us_S.index
-                        if stressor in stressor_to_fid and abs(float(us_S.loc[stressor, sector])) >= threshold
+                        (stressor_to_fid[stressor], float(us_M.loc[stressor, sector]))
+                        for stressor in us_M.index
+                        if stressor in stressor_to_fid and abs(float(us_M.loc[stressor, sector])) >= threshold
                     ]
                     if entries:
                         if iid not in satellite_data:
                             satellite_data[iid] = []
                         satellite_data[iid].extend(entries)
+
+                    # Aggregated entries for the default file — every stressor
+                    # in this extension for this sector, not threshold-filtered
+                    # (EPA's own GHG selection doesn't apply a magnitude cutoff
+                    # either; the aggregation itself is the reduction).
+                    stressor_pairs = [(stressor, float(us_M.loc[stressor, sector])) for stressor in us_M.index]
+                    agg_entries = aggregate_coefficients(stressor_pairs, ext_name)
+                    if agg_entries:
+                        satellite_aggregate.setdefault(iid, []).extend(agg_entries)
 
         # Sort each industry's full factor list globally by magnitude (descending).
         # This allows callers to slice [:N] to get the top-N selected factors.
@@ -284,8 +304,21 @@ class StateTradeAnalyzer:
             satellite_data[iid].sort(key=lambda x: abs(x[1]), reverse=True)
 
         self._satellite_data = satellite_data
+        self._satellite_data_aggregate = satellite_aggregate
         print(f"    Satellite data loaded: {len(satellite_data)} US industries with factor coefficients")
         return satellite_data
+
+    def get_satellite_aggregate_entries(self, industry_id):
+        """
+        Return the EPA-style aggregated (factor_id, coefficient) entries for
+        a 5-character industry ID — used by the default interstate_factor.csv
+        instead of a top-N-by-magnitude slice of get_satellite_factor_entries.
+        See exiobase_factors.py.
+        """
+        satellite = getattr(self, '_satellite_data_aggregate', None)
+        if not satellite:
+            return []
+        return satellite.get(str(industry_id), [])
 
     def _make_industry_id(self, sector_str, index, used_ids):
         """Generate 5-char industry ID from sector name (mirrors create_sector_mapping.py logic)."""

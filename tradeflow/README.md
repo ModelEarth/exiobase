@@ -7,7 +7,7 @@ Exiobase US-to-US domestic `trade_id` relates trade to state-to-state `interstat
 
 Table naming designed for 3rd graders. [View Report Sample](../../profile/footprint/) from [Exiobase .csv output](https://github.com/ModelEarth/trade-data/tree/main/year) and [US State Data](../../profile/footprint/)
 
-**The trade_id field** in trade.csv relates 5 values (year, region1, region2, industry1, industry2) to multiple impact factors for each trade row.
+**The trade_id field** in trade.csv relates 4 values (region1, region2, industry1, industry2) to multiple impact factors for each trade row.
 
 **The factor_id field** represents 721 unique impacts applied to each annual trade row (for imports, exports and domestic).
 
@@ -34,7 +34,15 @@ Combing state-to-state consumption: [Exiobase plus BEA](bea) based on the [USEEI
 
 ## Processing
 
-Set a year and country in the config.yaml file and run:
+Set a year and country in the config.yaml file. `main.py`/`trade.py` download the Exiobase year
+file automatically if it's missing, but for a visible first-time download (roughly 0.2-4 GB, depending on year), run this
+first — see [AGENTS.md](AGENTS.md) for details:
+
+```bash
+python exiobase_download.py
+```
+
+Then run:
 
 ```bash
 python main.py
@@ -68,15 +76,15 @@ Does not include interstate bea/main.py processing
 The main.py command generates the following CSV files for each country/tradeflow combination:
 - `factor.csv` - Environmental factor definitions (721 factors)
 - `industry.csv` - Industry sector mapping
-- `trade.csv` - Core trade flows (trade_id, year, region1, region2, industry1, industry2, amount)
-- `trade_factor.csv` - Environmental coefficients (120 Selected Factors for imports/exports)
+- `trade.csv` - Core trade flows (trade_id, region1, region2, industry1, industry2, amount)
+- `trade_factor.csv` - Environmental coefficients (aggregated flows — see below)
 - `trade_factor_lg.csv` - All environmental coefficients (721 factors for domestic flows)
 - `trade_impact.csv` - Aggregated environmental impacts
 - `trade_resource.csv` - Resource use analysis
 - `trade_material.csv` - Material flow analysis
 - `trade_employment.csv` - Employment impact analysis
 
-**120 Selected Factors:** Since each trade flow row gets one row per factor, the row count scales linearly — 120 factors produces 16.6% as many rows as 721 factors (120 / 721 = 16.6%). The top 120 are selected per industry from 721 total Exiobase stressors (air emissions, employment, energy, land, material, water extensions) by ranking all stressors whose absolute S-matrix coefficient meets `min_impact_threshold` (0.001) in descending order and keeping the first `partial_factor_limit` (120). `trade_factor_lg.csv` retains all 721 factors and is generated for domestic flows where the larger file is manageable.
+**Aggregated flows, not top-N-by-magnitude:** `trade_factor.csv` no longer ranks the 721 raw Exiobase stressors (air emissions, employment, energy, land, material, water) by `|M-matrix coefficient|` and keeps the largest N — it aggregates (sums) raw stressors into a small, fixed set of flows per industry, mirroring EPA USEEIO's own [import_emission_factors](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) approach: `air_emissions` collapses to 5 curated GHG flows (EPA's own mapping, copied verbatim — see `exiobase_factors.py`), and the other five extensions each collapse to one placeholder flow (every raw stressor summed) pending a real curated source for them. `trade_factor_lg.csv` still retains all 721 raw, unaggregated stressors for anyone who wants the full detail. See [bea/README.md](bea/README.md#epa-import-factor-reduction) for the full comparison against EPA's methodology.
 
 The bea/main.py command generates the following CSV files for US domestic flows:
 - `interstate.csv` — one row per state-pair flow (`interstate_id`, `trade_id`, `state1`, `state2`, `industry1`, `industry2`, `state_industry_code`, `amount`, `commodity_code`, `industry_code`, `economic_multiplier`). Now always produced, satellite factor data available or not.
@@ -106,9 +114,13 @@ The bea/main.py command generates the following CSV files for US domestic flows:
 
 **Removed `_create_interstate_csvfiles` (`bea/main.py`)** — dead code, never called, and actively wrong if it had been: it just copied the international `trade.csv` verbatim and renamed `trade_id` to `interstate_id`, with no real state disaggregation at all, so it would've written country-level `region1`/`region2` data mislabeled as state-level `interstate.csv`.
 
-**`insert_interstate_rows` reads `interstate.csv` by header name, not fixed position** — a real bug fix: `interstate.csv`'s actual column order is `interstate_id, trade_id, year, state1, state2, industry1, industry2, state_industry_code, amount, commodity_code, industry_code, economic_multiplier`, which doesn't match `trade.csv`'s simpler layout. The old code read `region1`/`region2`/etc. from fixed positions borrowed from `trade.csv`, which silently misread every field once `interstate_id` shifted the real columns over by one. It now looks each column up by name, with position fallbacks only for files with no matching header.
+**`insert_interstate_rows` reads `interstate.csv` by header name, not fixed position** — a real bug fix: `interstate.csv`'s actual column order is `interstate_id, trade_id, state1, state2, industry1, industry2, state_industry_code, amount, commodity_code, industry_code, economic_multiplier`, which doesn't match `trade.csv`'s simpler layout. The old code read `region1`/`region2`/etc. from fixed positions borrowed from `trade.csv`, which silently misread every field once `interstate_id` shifted the real columns over by one. It now looks each column up by name, with position fallbacks only for files with no matching header.
 
-**One database per year:** the `year` column is being dropped from `trade`, `trade_factor`, and `interstate` in the database — a given Postgres database now holds exactly one year's data (`{EXIOBASE_NAME}_{year}`), so `year` is implicit in which database you're connected to rather than a per-row value. The CSV files themselves are unchanged and still carry a `year` column; it's just no longer written into these tables when the API loads the CSVs.
+**One database per year:** the `year` column is dropped from `trade`, `trade_factor`, and `interstate`, both in the database and in the CSV files themselves (`trade.py`, `bea/main.py`) — a given Postgres database now holds exactly one year's data (`{EXIOBASE_NAME}_{year}`), so `year` is implicit in which database you're connected to rather than a per-row value. (`interstate_id`'s embedded `{year}` prefix is unrelated — it's just one more uniqueness component of a composite string key, not a stored `year` column.)
+
+**Import factors now use Exiobase's M matrix, not S** (`trade.py`, `bea/main_trade_analyzer.py`) — `S` is direct-only environmental intensity per unit of output; `M` (`S` combined with the Leontief inverse) also captures everything embodied in a sector's own upstream inputs. EPA USEEIO's [import_emission_factors](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) methodology (`exiobase_helpers.py`) builds its published import factors from `M`, so `trade_factor.csv`/`interstate_factor.csv` levels previously understated a traded good's true footprint by omitting its supply chain. `trade.amount`/`interstate.amount` remain in Euros (see the TO DO in [bea/README.md](bea/README.md) about a Euro→USD lookup, which EPA's process also applies and ours doesn't yet) — that's a separate, still-open gap from the S→M fix.
 
 **Same-state (`state1 == state2`) rows are kept, not filtered.** `_disaggregate_single_flow` (`bea/main_trade_analyzer.py`) allocates each domestic `trade.amount` across producing-state × consuming-state pairs, normalized to sum to exactly that amount. Earlier it skipped same-state pairs before normalizing, which silently reallocated genuine intra-state consumption onto cross-state pairs, inflating them. Same-state pairs are now included in the normalization and land in `interstate` as ordinary `state1 == state2` rows with `flow_type = 'intra_state'` (cross-state rows stay `'inter_state'`) — so the total across all rows for a `trade_id` still equals `trade.amount`, but now for the right reason.
 
+
+**`factor.csv` now has two kinds of rows: raw per-stressor (1–721) and aggregated flows (901–910).** The aggregate ID block is a fixed offset chosen well clear of the raw range so both can coexist in one file without collision, regardless of a given year's exact Exiobase stressor count — `trade_factor_lg.csv`/`interstate_factor_lg.csv` reference the raw rows, `trade_factor.csv`/`interstate_factor.csv` reference the aggregate rows. See [bea/README.md](bea/README.md#epa-import-factor-reduction) and `exiobase_factors.py` for what the aggregate rows are and why.

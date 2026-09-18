@@ -8,6 +8,7 @@ import pymrio
 from pathlib import Path
 import uuid
 from config_loader import load_config, get_reference_file_path
+from exiobase_factors import aggregate_definitions
 
 def create_factors_csv():
     """
@@ -110,12 +111,25 @@ def create_factors_csv():
                     
                     factor_id += 1
     
+    # Append the fixed aggregate-flow rows (factor_id 901+) used by the
+    # default trade_factor.csv/interstate_factor.csv — see exiobase_factors.py.
+    # trade_factor_lg.csv/interstate_factor_lg.csv keep using the 1-721 raw
+    # per-stressor rows above; both live in this same factor.csv since the
+    # aggregate ID block is chosen well clear of the raw range.
+    for factor_id, unit, stressor, extension in aggregate_definitions():
+        all_factors.append({
+            'factor_id': factor_id,
+            'unit': unit,
+            'stressor': stressor,
+            'extension': extension
+        })
+
     # Create DataFrame
     factors_df = pd.DataFrame(all_factors)
-    
+
     # Create the final factor.csv with only required columns
     output_df = factors_df[['factor_id', 'unit', 'stressor', 'extension']].copy()
-    
+
     # Save to CSV
     output_file = get_reference_file_path(config, 'factors')
     output_df.to_csv(output_file, index=False)
@@ -125,9 +139,9 @@ def create_factors_csv():
     # Display summary
     print(f"\nFactors summary:")
     print(f"Total factors: {len(output_df)}")
-    print(f"Contexts: {output_df['context'].nunique()}")
-    print(f"\nContext breakdown:")
-    print(output_df['context'].value_counts())
+    print(f"Extensions: {output_df['extension'].nunique()}")
+    print(f"\nExtension breakdown:")
+    print(output_df['extension'].value_counts())
     
     print(f"\nFirst 15 factors:")
     print(output_df.head(15).to_string(index=False))

@@ -365,6 +365,7 @@ FodyWeavers.xsd
 
 exiobase_data
 trade_factors_lg.csv
+.venv/
 
 .DS_Store
 
