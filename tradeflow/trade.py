@@ -40,7 +40,10 @@ import pickle as pkl
 import argparse
 from config_loader import load_config, get_file_path, get_reference_file_path, print_config_summary
 from exiobase_download import ensure_exiobase_file
-from exiobase_factors import EPA_GHG_FLOWS, AGGREGATE_FACTOR_IDS, EXTENSION_PLACEHOLDER_FACTOR_IDS
+from exiobase_factors import (
+    EPA_GHG_FLOWS, AGGREGATE_FACTOR_IDS,
+    EXTENSION_AGGREGATE_FACTOR_IDS, EXTENSION_STRESSOR_PREFIXES,
+)
 
 class ExiobaseTradeFlow:
     def __init__(self, use_large_factors=False):
@@ -130,8 +133,9 @@ class ExiobaseTradeFlow:
         flows for the default trade_factor.csv, replacing the old
         top-N-by-magnitude selection outright. air_emissions uses EPA
         USEEIO's own curated GHG flow list (5 flows); the other five
-        extensions sum every stressor into one placeholder flow each, until
-        an external source defines a real curated breakdown for them. See
+        extensions sum a scoped subset of stressors (or every stressor, for
+        'land') into one flow each, matching the corresponding USEEIO
+        indicator's scope as closely as Exiobase's own categories allow. See
         exiobase_factors.py.
         """
         if ext_name == 'air_emissions':
@@ -145,9 +149,13 @@ class ExiobaseTradeFlow:
                 matched.groupby(['region', 'industry_id', 'factor_id'], as_index=False)['coefficient']
                 .sum()
             )
-        elif ext_name in EXTENSION_PLACEHOLDER_FACTOR_IDS:
-            result = F_stacked.groupby(['region', 'industry_id'], as_index=False)['coefficient'].sum()
-            result['factor_id'] = EXTENSION_PLACEHOLDER_FACTOR_IDS[ext_name]
+        elif ext_name in EXTENSION_AGGREGATE_FACTOR_IDS:
+            prefixes = EXTENSION_STRESSOR_PREFIXES.get(ext_name)
+            scoped = F_stacked
+            if prefixes:
+                scoped = F_stacked[F_stacked['stressor'].astype(str).str.startswith(tuple(prefixes))]
+            result = scoped.groupby(['region', 'industry_id'], as_index=False)['coefficient'].sum()
+            result['factor_id'] = EXTENSION_AGGREGATE_FACTOR_IDS[ext_name]
         else:
             result = F_stacked.iloc[0:0][['region', 'industry_id', 'coefficient']].copy()
             result['factor_id'] = []
@@ -204,7 +212,17 @@ class ExiobaseTradeFlow:
                         # which builds import factors from M. S alone would
                         # omit everything embodied in a sector's own inputs,
                         # understating a traded good's true footprint.
-                        M_matrix = ext.M
+                        # A handful of raw Exiobase cells are NaN (typically a
+                        # 0/0 from a sector with zero output in some region)
+                        # rather than 0. Since M is a global Leontief-inverse
+                        # product, a single NaN anywhere poisons that entire
+                        # stressor's M row for every region — fillna(0) here
+                        # (a real "no reported value", not "unknown") before
+                        # any aggregation sums these together, or a single
+                        # poisoned cell silently NaNs out an aggregated flow
+                        # that has real data from its other contributing
+                        # stressors.
+                        M_matrix = ext.M.fillna(0)
 
                         # Convert M matrix to a lookup format.
                         # M matrix values are total physical intensity per unit output.

@@ -172,14 +172,19 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 - **Factor Selection**: Not a top-N-by-magnitude slice — raw stressors are aggregated (summed) into a small,
   fixed set of flows per industry, mirroring EPA USEEIO's own `import_emission_factors` methodology:
   5 curated GHG flows for `air_emissions` (Carbon dioxide, Methane, Nitrous oxide, Sulfur hexafluoride,
-  HFCs and PFCs unspecified — EPA's own mapping, copied verbatim), plus one placeholder flow per other
-  extension (employment, energy, land, material, water — pending a real curated source; see
-  `exiobase_factors.py`'s TODO). Up to 10 rows per industry rather than up to 120/721.
+  HFCs and PFCs unspecified — EPA's own mapping, copied verbatim), plus one flow per other
+  extension (employment, energy, land, material, water) scoped to match the corresponding USEEIO
+  indicator's coverage (see `exiobase_factors.py`'s `EXTENSION_STRESSOR_PREFIXES`). Up to 10 rows
+  per industry rather than up to 120/721.
 - **Rationale**: International trade volumes are massive - using all 721 raw factors would create files >1.5GB;
   aggregating to a small flow set also matches EPA's published import-factor product for GHGs.
 - **Performance**: Fast processing, no memory issues
-- **Coverage**: GHG-complete for air_emissions; the other five extensions are single-flow placeholders, not a
-  substance-specific breakdown, until a real external source is found (see `bea/README.md`)
+- **Coverage**: GHG-complete for air_emissions; the other five extensions are single scoped flows matching
+  USEEIO indicator coverage (Jobs Supported, Energy Use, Land Use, Minerals and Metals Use, Water Use), but
+  computed from Exiobase, not USEEIO's own government-inventory sources. These five won't numerically match
+  either the older EPA repo's or cornerstone-data's published values — USEEIO computes them from separate US
+  government data (BLS for jobs, EIA for energy, USDA for land, USGS for water and minerals), not from
+  Exiobase — so this is a scope match only, not a value match. See `bea/README.md`'s "Beyond GHGs" section.
 
 #### **trade_factor_lg.csv** (Large File - All 721 raw, unaggregated Factors) 
 - **Used for**: Domestic flows (intra-country trade only)
@@ -320,7 +325,7 @@ in a sector's own inputs, via the Leontief inverse) is loaded directly from the 
 via pymrio — no intermediate CSVs are read. The default file uses the fixed aggregate factor_ids
 (901-910, see exiobase_factors.py) rather than raw per-stressor factor_ids: `air_emissions`
 collapses to EPA's own 5-flow GHG list, the other five extensions each collapse to a single
-placeholder flow. `interstate_factor_lg.csv` (when `use_partial_factors_interstate: false`)
+flow scoped to match the corresponding USEEIO indicator's coverage. `interstate_factor_lg.csv` (when `use_partial_factors_interstate: false`)
 instead uses every raw per-stressor factor_id (1-721, assigned by row position across extensions
 in order: `air_emissions`, `employment`, `energy`, `land`, `material`, `water`, same ordering as
 `factor.csv`), filtered by `min_impact_threshold` only, no top-N cap. If the zip is unavailable,

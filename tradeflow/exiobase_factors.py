@@ -16,15 +16,32 @@ https://github.com/USEPA/USEEIO/blob/master/import_emission_factors/data/mrio_co
 stressor name on its first " - ", map the prefix, drop anything that
 doesn't map, then group by flow and sum).
 
-TODO: EPA's own published import-factor product only covers these GHGs —
-it doesn't include employment, energy, land, material, or water at all, so
-there's no equivalent curated list to copy for those five extensions. Until
-an external source (EPA, USEEIO, or otherwise) defines one, each of those
-extensions is aggregated into a single placeholder flow (every raw stressor
-in the extension, summed) rather than a real substance-specific breakdown —
-dimensionally consistent (each extension uses one unit, per
-bea/README.md's Units table) but not a considered selection like the GHGs
-are. Replace EXTENSION_PLACEHOLDER_* once a real source is found.
+EPA's own published import-factor product only covers these GHGs — it
+doesn't include employment, energy, land, material, or water at all, so
+there's no equivalent curated stressor-to-flow mapping to copy for those
+five extensions (see bea/README.md's "Beyond GHGs" section). USEPA's USEEIO
+work now continues at https://github.com/cornerstone-data (its `useeior`
+package, successor to https://github.com/USEPA/useeior); its indicator list
+(inst/extdata/USEEIO_LCIA_Indicators.csv) does define matching target
+categories — Jobs Supported (JOBS), Energy Use (ENRG), Land Use (LAND),
+Water Use (WATR), Minerals and Metals Use (MNRL) — but computes them from
+separate US-specific government inventories (BLS, EIA, USDA, USGS) joined
+to BEA/NAICS sectors, not by characterizing MRIO stressor flows. There's no
+external source to copy a stressor mapping from, so EXTENSION_STRESSOR_SELECTION
+below is our own selection of which raw Exiobase stressors fall within each
+indicator's scope — chosen to avoid two failure modes visible in Exiobase's
+own stressor list once you look at it (see bea/README.md): mixing
+incompatible units in one sum (employment: "people" in 1000 persons vs
+"hours" in M.hr), and double/triple-counting different measurement bases of
+the same underlying quantity (energy: Gross/Net/Final/Emission-relevant are
+4 definitions of one thing, not 4 additive components; water: Withdrawal
+and Consumption are different measures of the same water use). This keeps
+our own extension names (employment/energy/land/material/water — not
+renamed to USEEIO's indicator names, since the computation still isn't
+USEEIO's) while matching USEEIO's indicator *scope* as closely as
+Exiobase's own categories allow. It will not reproduce USEEIO's published
+*values* for these five — different source data, not just a different
+selection — only closer conceptual alignment.
 """
 
 EPA_GHG_FLOWS = {
@@ -35,6 +52,16 @@ EPA_GHG_FLOWS = {
     'PFC': 'HFCs and PFCs, unspecified',
     'SF6': 'Sulfur hexafluoride',
 }
+
+# NOTE: as of Exiobase v3.8.2 (confirmed 2019 and 2021 pxp downloads), the
+# SF6/HFC/PFC raw stressor rows each have substantial real nonzero data in
+# ext.air_emissions.F, but ext.air_emissions.M (the Leontief-inverse total
+# requirement) is 100% NaN for all three, across every region — a single
+# poisoned cell somewhere in the global S matrix corrupts each row's entire
+# M output (see trade.py's/main_trade_analyzer.py's fillna(0) comments).
+# fillna(0) turns that into a real 0 here, silently discarding real
+# emissions data rather than confirming a genuine absence like 'energy'
+# below. Not fixed here — would need finding/correcting the poisoned cell.
 
 # Fixed factor_id block for every aggregated flow this module produces,
 # separate from the 1-721 raw per-stressor IDs in factor.csv (still used by
@@ -49,7 +76,7 @@ AGGREGATE_FACTOR_IDS = {
     'HFCs and PFCs, unspecified': 905,
 }
 
-EXTENSION_PLACEHOLDER_FACTOR_IDS = {
+EXTENSION_AGGREGATE_FACTOR_IDS = {
     'employment': 906,
     'energy': 907,
     'land': 908,
@@ -57,12 +84,50 @@ EXTENSION_PLACEHOLDER_FACTOR_IDS = {
     'water': 910,
 }
 
-EXTENSION_PLACEHOLDER_NAMES = {
-    'employment': 'Employment (aggregate placeholder — see exiobase_factors.py TODO)',
-    'energy': 'Energy (aggregate placeholder — see exiobase_factors.py TODO)',
-    'land': 'Land (aggregate placeholder — see exiobase_factors.py TODO)',
-    'material': 'Material (aggregate placeholder — see exiobase_factors.py TODO)',
-    'water': 'Water (aggregate placeholder — see exiobase_factors.py TODO)',
+EXTENSION_AGGREGATE_NAMES = {
+    'employment': 'Employment (people, jobs-scope — see exiobase_factors.py)',
+    'energy': 'Energy (gross use, ENRG-scope — see exiobase_factors.py)',
+    'land': 'Land (total, LAND-scope — see exiobase_factors.py)',
+    'material': 'Material (metals and minerals, MNRL-scope — see exiobase_factors.py)',
+    'water': 'Water (blue withdrawal, WATR-scope — see exiobase_factors.py)',
+}
+
+# Which raw stressors count toward each extension's aggregate, chosen to
+# match the scope of the corresponding USEEIO indicator (see module
+# docstring) and avoid summing incompatible units or double-counting
+# different measures of the same quantity. A stressor counts if its name
+# starts with any of these prefixes; 'land' has no entry, meaning every
+# stressor in that extension counts (they're genuinely additive distinct
+# land-use categories — Exiobase has no overlapping "total" row to avoid
+# double-counting against, unlike energy/water).
+EXTENSION_STRESSOR_PREFIXES = {
+    # USEEIO's Jobs Supported (JOBS) is a headcount; Exiobase's "Employment
+    # hours" (a different unit, M.hr) isn't part of that scope.
+    'employment': ['Employment people'],
+    # Gross/Net/Final/Emission-relevant are 4 different definitions of one
+    # quantity, not 4 additive components — Gross is the closest to USEEIO's
+    # Energy Use (ENRG), which is a total primary-energy-basis measure.
+    # NOTE: as of Exiobase v3.8.2, all four of these are 0 for every
+    # region/sector/year (confirmed in both the 2019 and 2021 pxp
+    # downloads: ext.energy.F is entirely zero, not NaN) — this extension's
+    # source data is simply empty in this Exiobase release, not something
+    # our selection logic can work around. Factor 907 will read 0 for every
+    # row until Exiobase publishes real energy data or we source it
+    # elsewhere (see bea/README.md's "Beyond GHGs" section).
+    'energy': ['Energy use - Gross'],
+    # USEEIO's Minerals and Metals Use (MNRL) excludes crops, forestry,
+    # fishery, and fossil fuels — those aren't minerals or metals, even
+    # though Exiobase's "material" extension lumps all of it together as
+    # "Domestic Extraction Used".
+    'material': [
+        'Domestic Extraction Used - Metal Ores',
+        'Domestic Extraction Used - Non-Metallic Minerals',
+    ],
+    # Water Withdrawal and Water Consumption are different measures of the
+    # same underlying water use (withdrawal is the larger, more commonly
+    # reported figure); Water Consumption Green is a different resource
+    # entirely (soil moisture, never withdrawn from a blue-water source).
+    'water': ['Water Withdrawal Blue'],
 }
 
 # extension -> unit, matching bea/README.md's Units table (one unit per
@@ -86,9 +151,13 @@ def aggregate_definitions():
     rows = []
     for flow, factor_id in AGGREGATE_FACTOR_IDS.items():
         rows.append((factor_id, EXTENSION_UNITS['air_emissions'], flow, 'air_emissions'))
-    for ext_name, factor_id in EXTENSION_PLACEHOLDER_FACTOR_IDS.items():
-        rows.append((factor_id, EXTENSION_UNITS[ext_name], EXTENSION_PLACEHOLDER_NAMES[ext_name], ext_name))
+    for ext_name, factor_id in EXTENSION_AGGREGATE_FACTOR_IDS.items():
+        rows.append((factor_id, EXTENSION_UNITS[ext_name], EXTENSION_AGGREGATE_NAMES[ext_name], ext_name))
     return rows
+
+
+def _matches_prefix(stressor, prefixes):
+    return any(str(stressor).startswith(p) for p in prefixes)
 
 
 def aggregate_coefficients(stressor_coefficient_pairs, ext_name):
@@ -99,8 +168,9 @@ def aggregate_coefficients(stressor_coefficient_pairs, ext_name):
 
     air_emissions: keeps only the 6 EPA GHG-mapped prefixes, summed into up
     to 5 flows (rows with no matching prefix are dropped, same as EPA's own
-    filter). All other extensions: every stressor summed into that
-    extension's single placeholder flow (see module docstring TODO).
+    filter). All other extensions: stressors matching that extension's
+    EXTENSION_STRESSOR_PREFIXES scope (or every stressor, for 'land', which
+    has no entry) summed into that extension's single aggregate flow.
     """
     if ext_name == 'air_emissions':
         totals = {}
@@ -112,9 +182,16 @@ def aggregate_coefficients(stressor_coefficient_pairs, ext_name):
             totals[flow] = totals.get(flow, 0.0) + coefficient
         return [(AGGREGATE_FACTOR_IDS[flow], total) for flow, total in totals.items()]
 
-    if ext_name not in EXTENSION_PLACEHOLDER_FACTOR_IDS:
+    if ext_name not in EXTENSION_AGGREGATE_FACTOR_IDS:
         return []
     if not stressor_coefficient_pairs:
         return []
-    total = sum(coefficient for _, coefficient in stressor_coefficient_pairs)
-    return [(EXTENSION_PLACEHOLDER_FACTOR_IDS[ext_name], total)]
+    prefixes = EXTENSION_STRESSOR_PREFIXES.get(ext_name)
+    if prefixes:
+        pairs = [(s, c) for s, c in stressor_coefficient_pairs if _matches_prefix(s, prefixes)]
+    else:
+        pairs = stressor_coefficient_pairs
+    if not pairs:
+        return []
+    total = sum(coefficient for _, coefficient in pairs)
+    return [(EXTENSION_AGGREGATE_FACTOR_IDS[ext_name], total)]

@@ -271,7 +271,16 @@ class StateTradeAnalyzer:
                 if not hasattr(ext, 'M'):
                     continue
                 try:
-                    us_M = ext.M.xs('US', level='region', axis=1)
+                    # fillna(0): a handful of raw Exiobase cells are NaN
+                    # (typically a 0/0 from a sector with zero output in some
+                    # region) rather than 0. Since M is a global
+                    # Leontief-inverse product, a single NaN anywhere poisons
+                    # that entire stressor's M row for every region — treat
+                    # it as a real "no reported value" before summing raw
+                    # stressors into an aggregated flow, or a single poisoned
+                    # cell silently NaNs out a flow that has real data from
+                    # its other contributing stressors.
+                    us_M = ext.M.xs('US', level='region', axis=1).fillna(0)
                 except KeyError:
                     continue
 
