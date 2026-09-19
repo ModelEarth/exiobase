@@ -264,6 +264,7 @@ waitForLocalsiteJs();
         <button type="button" class="schema-panel-menu-btn" id="schemaPanelMenuBtn" title="Schema options" aria-label="Schema options">&#8943;</button>
         <div class="schema-menu" id="schemaPanelMenu">
           <a href="#" id="schemaMenuMyLayoutJson">My Layout JSON</a>
+          <a href="#" id="schemaMenuResetLayout">Reset Layout</a>
         </div>
       </div>
     </div>
@@ -894,10 +895,11 @@ waitForLocalsiteJs();
 
   // ---- Schema panel ⋮ menu: export this browser's table layout as JSON ----
   function setupSchemaPanelMenu() {
-    const menuBtn  = document.getElementById('schemaPanelMenuBtn');
-    const menu     = document.getElementById('schemaPanelMenu');
-    const copyLink = document.getElementById('schemaMenuMyLayoutJson');
-    if (!menuBtn || !menu || !copyLink) return;
+    const menuBtn   = document.getElementById('schemaPanelMenuBtn');
+    const menu      = document.getElementById('schemaPanelMenu');
+    const copyLink  = document.getElementById('schemaMenuMyLayoutJson');
+    const resetLink = document.getElementById('schemaMenuResetLayout');
+    if (!menuBtn || !menu || !copyLink || !resetLink) return;
 
     menuBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -952,6 +954,14 @@ waitForLocalsiteJs();
           done(false);
         }
       }
+    });
+
+    resetLink.addEventListener('click', e => {
+      e.preventDefault();
+      menu.style.display = 'none';
+      if (!confirm('Clear this browser\'s saved table positions and reload with the file\'s default layout?')) return;
+      try { localStorage.removeItem('industry-schema-positions'); } catch (err) {}
+      location.reload();
     });
   }
   setupSchemaPanelMenu();
