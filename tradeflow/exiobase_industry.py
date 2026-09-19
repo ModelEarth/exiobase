@@ -2,7 +2,7 @@
 Exiobase sector -> BEA Sector (~21-category) industry aggregation, used to
 produce the small, git-committable primary output files (trade.csv,
 trade_factor.csv, interstate.csv, interstate_factor.csv, ...) alongside the
-full-detail "-lg" files. See PLAN-industry.md for the full design.
+full-detail "-lg" files. See PLAN.md for the full design.
 
 Chains three concordance files:
   Exiobase sector -> USEEIO Detail  (exio_to_useeio2_commodity_concordance.csv)
@@ -31,13 +31,13 @@ land in each one (the same vote count previously used for a single
 majority-vote pick). This mirrors EPA's own `generate_import_factors.py` in
 spirit — `get_weighted_average()` there also splits proportionally across
 multiple MRIO sectors folding into one BEA sector, though weighted by real
-import/export quantity, which we don't have (see PLAN-industry.md's open
+import/export quantity, which we don't have (see PLAN.md's open
 weighting question); Detail-code-count is a documented approximation of
 that, not a substitute for it.
 
 For the database relationship (not just CSV aggregation), the same
 many-to-many nature argues for a sector_industry join table rather than a
-single industry.sector_id column — see PLAN-industry.md.
+single industry.sector_id column — see PLAN.md.
 """
 
 import csv
@@ -52,7 +52,7 @@ def lg_path(path):
     "_lg" convention (trade_factor_lg.csv/interstate_factor_lg.csv, meaning
     "all 721 raw unaggregated factors") — this "-lg" means "full Exiobase
     industry detail, not aggregated to BEA Sector level." See
-    PLAN-industry.md.
+    PLAN.md.
     """
     p = Path(path)
     return p.with_name(f"{p.stem}-lg{p.suffix}")
@@ -97,7 +97,7 @@ def load_exiobase_to_sector_weights():
     locally — callers should route through bea/main.py's
     _ensure_concordance_file first for the two EPA-published files;
     bea_summary_to_sector_concordance.csv has no auto-fetch source yet (see
-    PLAN-industry.md) and must exist locally.
+    PLAN.md) and must exist locally.
     """
     exio_to_detail = {}
     with open(CONCORDANCE_DIR / 'exio_to_useeio2_commodity_concordance.csv') as f:

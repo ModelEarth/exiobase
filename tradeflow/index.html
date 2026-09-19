@@ -372,7 +372,7 @@ waitForLocalsiteJs();
   }
 
   // ---- Hash change listener ----
-  // Each year has its own database (see PLAN-industry.md), so navigating to
+  // Each year has its own database (see PLAN.md), so navigating to
   // a link like #tradeflowYear=2021 while this page is already open needs
   // to re-fetch the live schema for that year, not just update the dropdown.
   document.addEventListener('hashChangeEvent', function () {
@@ -851,7 +851,7 @@ waitForLocalsiteJs();
       // interstate_estimate is commented out — real satellite factor data has
       // been available for every run so far, so interstate_factor is always
       // populated and interstate_estimate never has rows. Uncomment if a
-      // future run genuinely lacks satellite data. See PLAN-industry.md.
+      // future run genuinely lacks satellite data. See PLAN.md.
       // interstate_estimate: [{name:'interstate_id',type:'varchar(80)'},{name:'employment_impact',type:'numeric'},{name:'flow_type',type:'varchar(20)'}]
     };
   }

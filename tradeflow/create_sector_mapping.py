@@ -170,7 +170,7 @@ def create_sector_table():
     """
     Write sector.csv: the ~21-category BEA Sector table (sector_id, name),
     referenced by trade.sector1/2 and interstate.sector1/2 via the
-    sector_industry many-to-many join (see PLAN-industry.md,
+    sector_industry many-to-many join (see PLAN.md,
     exiobase_industry.py).
     """
     config = load_config()

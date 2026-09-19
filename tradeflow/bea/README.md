@@ -4,7 +4,7 @@
 
 The US-BEA data integration here combines Exiobase MRIO data with US Bureau of Economic Analysis API data to generate relational trade flow tables. This system extends our existing exiobase/tradeflow architecture to include detailed US trade analysis with enhanced state-level and industry-specific insights. Developed by referencing [US generate_import_factors.py](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) — that USEPA org's active development has since moved to [cornerstone-data](https://github.com/cornerstone-data) (see "Beyond GHGs" below for what we've found there so far).
 
-Our own industry classification (~200 codes, derived from Exiobase's raw sectors) has never been reconciled with BEA's official classifications (Detail ~405-411, Summary ~71-73, Sector ~21) that EPA's own process computes and publishes against — see [../PLAN-industry.md](../PLAN-industry.md) for the scoped plan to fix that, including the authoritative BEA source for the Sector-level crosswalk ([`apps.bea.gov/industry/release/zip/SUPPLY-USE.zip`](https://apps.bea.gov/industry/release/zip/SUPPLY-USE.zip), `Use_SUT_Framework_{year}_DET.xlsx`, sheet "NAICS Codes" — confirmed via `useeior`'s own build scripts) and the file-size-driven `-lg`/primary two-tier split this feeds into.
+Our own industry classification (~200 codes, derived from Exiobase's raw sectors) has never been reconciled with BEA's official classifications (Detail ~405-411, Summary ~71-73, Sector ~21) that EPA's own process computes and publishes against — see [../PLAN.md](../PLAN.md) for the scoped plan to fix that, including the authoritative BEA source for the Sector-level crosswalk ([`apps.bea.gov/industry/release/zip/SUPPLY-USE.zip`](https://apps.bea.gov/industry/release/zip/SUPPLY-USE.zip), `Use_SUT_Framework_{year}_DET.xlsx`, sheet "NAICS Codes" — confirmed via `useeior`'s own build scripts) and the file-size-driven `-lg`/primary two-tier split this feeds into.
 
 ### BEA Factor Aggregation
 
@@ -24,44 +24,47 @@ reduction](#epa-import-factor-reduction) and [Aggregated flows](#aggregated-flow
 
 ## EPA import factor reduction
 
-How our factor selection compares to EPA USEEIO's [import_emission_factors](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) (`generate_import_factors.py`, `exiobase_helpers.py`):
+How our factor selection compares to EPA USEEIO's [import_emission_factors](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors):
 
 **Matches EPA's methodology:**
-- **M matrix, not S.** EPA's `clean_exiobase_M_matrix()` builds import factors from Exiobase's `M` (total requirements — direct plus everything embodied in a sector's own upstream inputs, via the Leontief inverse), never the direct-only `S` matrix. Our pipeline (`trade.py`, `bea/main_trade_analyzer.py`) does the same, including `fillna(0)` on `M` before any aggregation — a handful of raw Exiobase cells are `NaN` (typically a `0/0` from a sector with zero output in some region) rather than `0`, and since `M` is a global Leontief-inverse product, a single `NaN` anywhere poisons that stressor's entire `M` row for every region. Treating that as a real `0` is correct when the underlying flow genuinely is absent, but see the `SF6`/`HFC`/`PFC` note below for a case where it isn't.
-- **Aggregation of a curated flow list, not magnitude ranking.** EPA's `clean_exiobase_M_matrix()` splits each raw Exiobase stressor name on its first `" - "` to get a substance prefix, maps that prefix through a small curated dict, drops anything that doesn't map, then `groupby(flow).sum()`. For `air_emissions`, we copy EPA's own mapping verbatim (see `exiobase_factors.py`, sourced from [`mrio_config.yml`](https://github.com/USEPA/USEEIO/blob/master/import_emission_factors/data/mrio_config.yml)) and do the identical split → map → filter → sum: `CO2`→Carbon dioxide, `CH4`→Methane, `N2O`→Nitrous oxide, `SF6`→Sulfur hexafluoride, and `HFC`/`PFC` both → "HFCs and PFCs, unspecified" (5 output flows from 6 raw prefixes). This replaced an earlier "top 50 (or top 120) raw stressors ranked by `|coefficient|`" selection, which picked different substances than EPA's GHG list and never aggregated multiple raw rows into one — that scheme could never reproduce EPA's numbers no matter what N was chosen, independent of the M-vs-S question above.
-- **FEDEFL flow identities.** Both use the [Federal LCA Commons Elementary Flow List](https://github.com/USEPA/fedelemflowlist) for environmental flow metadata (see `main_fedefl_integration.py`).
+- **M matrix, not S** — total requirements (direct + everything embodied in a sector's own upstream inputs, via the Leontief inverse), never the direct-only S matrix. We also fill NaN cells with 0 before aggregating, same as EPA — a handful of raw cells are a genuine 0/0 rather than a true 0, and since M is a global Leontief-inverse product, one NaN poisons that stressor's whole row everywhere. Correct when the flow really is absent (see the SF6/HFC/PFC note below for a case where it isn't).
+- **Curated flow list, not magnitude ranking.** For air_emissions we copy EPA's own GHG mapping verbatim (see exiobase_factors.py, sourced from EPA's `mrio_config.yml`): CO2, CH4, N2O, and SF6 each map 1:1, HFC and PFC both map to "HFCs and PFCs, unspecified" — 5 output flows from 6 raw prefixes. This replaced an earlier top-N-by-magnitude selection that picked different substances than EPA's list and never aggregated rows together.
+- **FEDEFL flow identities** — both use the [Federal LCA Commons Elementary Flow List](https://github.com/USEPA/fedelemflowlist).
 
-**Differs from EPA's methodology, by design (different output goal):**
-- **Aggregation vs. row-level detail.** EPA's published import factors are one row per (USEEIO sector, region, flow) — countries are pre-aggregated into 7 regions weighted by their contribution to US imports (`generate_import_shares.py`), and each region/sector pair carries one factor value per flow. We instead keep row-level `trade_id`/`interstate_id` granularity — one row per actual trade flow, aggregated only across raw stressors within a flow, not across trade flows or countries/regions. Aggregating further to EPA-style regional summaries is a `GROUP BY` query away rather than baked into the pipeline.
-- **Currency.** EPA converts EUR → USD using dated exchange rates (`exiobase_adjust_currency()`, via `CurrencyConverter`). `trade.amount`/`interstate.amount` are still in Euros here — a known open gap (see the TO DO above and in [../README.md](../README.md#schema-notes-ids-dedup-keys-and-one-database-per-year)), not yet implemented.
-- **Country/region correspondence.** EPA uses formal MRIO-to-USEEIO country and commodity concordance files (`concordances/`) to map Exiobase's regions and sectors onto USEEIO's. We map Exiobase sectors to our own 5-character `industry_id` (`create_sector_mapping.py`) rather than USEEIO's sector codes, since our tables aren't scoped to the USEEIO model.
+**Differs by design (different output goal):**
+- **Row-level detail, not regional aggregation.** EPA pre-aggregates countries into 7 import-weighted regions, one row per (sector, region, flow). We keep one row per actual trade flow — aggregated only across raw stressors within a flow, not across flows or countries. A regional rollup is a GROUP BY away, not baked into the pipeline.
+- **Currency** — EPA converts EUR to USD; ours stays in Euros (see [../PLAN.md](../PLAN.md)).
+- **Country/sector mapping** — EPA uses MRIO-to-USEEIO concordance files; we map to our own industry_id, since our tables aren't scoped to the USEEIO model.
 
-**Extra, beyond EPA's own product:** EPA's published import-factor product only covers these 5 GHG flows — it doesn't include employment, energy, land, material, or water at all. Our `employment`/`energy`/`land`/`material`/`water` aggregate flows (factor_id 906-910) are extra, not something EPA's own methodology defines or that we're matching against — see "Beyond GHGs" below.
+**Beyond EPA's own product:** EPA's factors only cover these 5 GHG flows. Our employment/energy/land/material/water flows (factor_id 906-910) are extra — not something EPA's methodology defines or that we're matching against. See below.
 
 ## Beyond GHGs: employment, energy, land, material, water
 
-EPA's own published import-factor product doesn't cover these five extensions at all — there's no curated stressor-to-flow mapping to copy for them the way there was for GHGs. USEPA's USEEIO work is now continued at [cornerstone-data](https://github.com/cornerstone-data) (its [`useeior`](https://github.com/cornerstone-data/useeior) package is the successor to [USEPA/useeior](https://github.com/USEPA/useeior)). Its indicator list ([`USEEIO_LCIA_Indicators.csv`](https://github.com/cornerstone-data/useeior/blob/master/inst/extdata/USEEIO_LCIA_Indicators.csv)) does define matching target categories:
+EPA's own product doesn't cover these five extensions — there's no curated mapping to copy the way there was for GHGs. USEEIO's continuation at [cornerstone-data](https://github.com/cornerstone-data) does define matching target indicators:
 
 | Extension (ours) | USEEIO indicator | Unit |
 |---|---|---|
 | employment | Jobs Supported (JOBS) | jobs |
-| energy | Energy Use (ENRG) — split into Nonrenewable (NNRG) / Renewable (RNRG) | MJ |
+| energy | Energy Use (ENRG) | MJ |
 | land | Land Use (LAND) | m²·yr |
 | material | Minerals and Metals Use (MNRL) | kg |
 | water | Water Use (WATR) | m³ |
 
-**These indicators aren't computed by characterizing MRIO stressor flows at all** — USEEIO sources them from separate US-specific government inventories joined to BEA/NAICS sectors: BLS for jobs, EIA for energy, USDA for land, USGS for water and minerals. There's no stressor-name-to-flow dict to copy the way there was for GHGs, so we can't reproduce USEEIO's actual published *values* for these five without integrating those external data sources — a materially bigger effort than the GHG fix, not attempted here.
+**These indicators come from separate US government inventories** (BLS jobs, EIA energy, USDA land, USGS water/minerals), not from characterizing MRIO stressors — so there's no dict to copy, and we can't reproduce USEEIO's actual published values without integrating those external sources (not attempted here).
 
-**What we did instead:** kept our own extension names (employment/energy/land/material/water, not renamed to USEEIO's indicator names — the computation still isn't USEEIO's), but replaced the original "sum every raw stressor in the extension" placeholder with a scoped selection matching each indicator's *scope* as closely as Exiobase's own stressor categories allow. Looking at Exiobase's actual stressor list surfaced two real problems with the original blanket sum, independent of matching EPA at all:
+**What we did instead:** kept our own extension names, but replaced "sum every raw stressor" with a selection scoped to match each indicator as closely as Exiobase's own categories allow:
 
-- **Mixed units.** Exiobase's `employment` extension has both "Employment people" (1000 persons) and "Employment hours" (M.hr) rows — summing them together added two different units. Now only "Employment people" counts, matching Jobs Supported's headcount scope.
-- **Double/quadruple-counting.** `energy` has 4 rows — Gross, Net, Final, Emission-relevant — that are 4 *different measurement bases of the same total*, not 4 additive components; summing all 4 overcounted by roughly 4x. Now only "Energy use - Gross" counts (closest to Energy Use's total primary-energy-basis scope). Similarly, `water` has "Withdrawal Blue" and "Consumption Blue" (different measures of the same use) plus "Consumption Green" (a different resource — soil moisture, never withdrawn); now only "Water Withdrawal Blue" counts, the conventional water-use accounting basis and the closer match to Water Use's scope.
-- **Wrong scope.** `material`'s "Domestic Extraction Used" stressors span crops, forestry, fishery, and fossil fuels alongside metal ores and non-metallic minerals — Minerals and Metals Use covers only the latter two categories, so crops/forestry/fishery/fossil-fuel stressors are now excluded.
-- **`land`** genuinely is additive across its categories (artificial surfaces, cropland, forest, pastures) with no overlapping "total" row to double-count against, so it's unchanged — every stressor still counts.
-- **`energy` reads 0 for every row, and this isn't fixable in our own code.** We confirmed (2019 and 2021 pxp downloads) that Exiobase v3.8.2's `energy` extension satellite data — all four of "Energy use - Gross/Net/Final/Emission relevant" — is entirely zero across every region and sector; it's not that our scoping excludes real data, there's no real data in this Exiobase release to select from. Matching Energy Use (ENRG) at all, not just matching its published value, would need sourcing energy data elsewhere (a different Exiobase extension file, or EIA directly, per the government-inventory point above).
-- **`SF6`/`HFC`/`PFC` (factor_id 904/905) also read 0 for every row — but for a different reason than energy, and this one is real underlying data we're currently losing.** Unlike `energy`, Exiobase's raw flow data (`F`) for these three has substantial nonzero values (thousands of nonzero region/sector cells each). But their `M` matrix (the Leontief-inverse-based total requirement, which the whole M-vs-S fix above depends on) is 100% `NaN` across every region — the same "a single poisoned cell in the global S matrix corrupts that stressor's entire M row" issue described in the M-vs-S section's fillna(0) fix, just landing on a stressor where the fix's fallback (treat NaN as 0) hides real emissions rather than confirming a genuine absence. Fixing this for real means finding and correcting (or excluding) whatever specific S-matrix cell is poisoning these three rows, not something attempted here.
+- **employment** — only "Employment people" counts (not "Employment hours" too, a different unit), matching Jobs Supported's headcount scope.
+- **energy** — Exiobase has 4 rows (Gross/Net/Final/Emission-relevant) that are different measurement bases of the *same* total, not additive; summing all 4 overcounted ~4x. Only "Energy use - Gross" counts now.
+- **water** — similarly, only "Water Withdrawal Blue" counts (not "Consumption Blue," a different measure of the same use, or "Consumption Green," a different resource entirely).
+- **material** — Exiobase's "Domestic Extraction Used" spans crops/forestry/fishery/fossil fuels too; Minerals and Metals Use covers only metal ores and non-metallic minerals, so the rest are excluded.
+- **land** — genuinely additive across its categories already, unchanged.
 
-See `exiobase_factors.py`'s `EXTENSION_STRESSOR_PREFIXES` for the exact selection.
+**Two known zero-data gaps (Exiobase v3.8.2, confirmed 2019/2021), neither fixable in our own code:**
+- **energy reads 0 for every row** — Exiobase's own energy extension is entirely zero in the raw source data. Matching this indicator at all needs a different data source (another Exiobase extension, or EIA directly).
+- **SF6/HFC/PFC (factor_id 904/905) also read 0** — but for a different reason: real nonzero values exist in Exiobase's raw flow data, but their M matrix is 100% NaN across every region, so our fillna(0) fix (needed elsewhere for genuine zeros) hides real emissions here instead. Fixing this means finding and correcting whichever underlying cell poisons these three rows — not attempted here.
+
+See exiobase_factors.py's `EXTENSION_STRESSOR_PREFIXES` for the exact selection.
 
 **Will this align with the older EPA repo and the newer cornerstone site?** For GHGs: yes with the older [USEPA/USEEIO](https://github.com/USEPA/USEEIO) `import_emission_factors` repo directly — we copied its exact `mrio_config.yml` mapping and its `clean_exiobase_M_matrix()` split-map-filter-sum approach, so our GHG aggregation implements the same methodology on the same Exiobase data (modulo whatever Exiobase version/year each side uses). cornerstone-data hasn't published its own copy of that specific GHG tool — it isn't in their repo list — so there's nothing there to diverge from; our conceptual alignment with cornerstone is only through `useeior`'s shared "Greenhouse Gases" indicator naming, not a second implementation to check against. For the other five: our aggregates now target the *same scope* as cornerstone's `useeior` indicators (Jobs Supported, Energy Use, Land Use, Minerals and Metals Use, Water Use), but will **not** numerically match either EPA repo's or cornerstone's published figures for these — those are computed from entirely different (US government inventory) source data, not from Exiobase, so scope alignment is the most we get without that larger data-integration project.
 
@@ -101,10 +104,10 @@ TO DO: We need to add a euro_dollar lookup by year.
 
 ### Reports
 - [Sankey](../../../profile/trade/map/sankey.html)
-- [Sample Report from Output](../../../trade-data/bea-dashboard/)
-- State-to-state domestic trade flows (upcoming)
-- State export competitiveness analysis (upcoming)
-- Import dependency by state (upcoming)
+- [Sample Report from Output](../../../trade-data/bea-dashboard/) — still references pre-rename column names, needs updating (see ../PLAN.md)
+- State-to-state domestic trade flows (interstate.csv)
+- State export competitiveness analysis (export_competitiveness.csv)
+- Import dependency by state (import_dependency.csv)
 
 ## Configuration Settings
 
@@ -141,7 +144,7 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 - `year/{year}/US/domestic/interstate_factor.csv` — real per-factor state-level flows (satellite data available)
 - `year/{year}/US/domestic/interstate_factor_lg.csv` — same as above with all 721 factors (generated when `use_partial_factors_interstate: false` in `config.yaml`)
 - `year/{year}/US/domestic/interstate_estimate.csv` — no-satellite-fallback leftover fields (satellite data unavailable); mutually exclusive with `interstate_factor.csv` per flow
-- `year/{year}/US/domestic/trade_price_indices.csv` — trade price indices (currently empty; see [PLAN.md](PLAN.md))
+- `year/{year}/US/domestic/trade_price_indices.csv` — trade price indices (currently empty; see [PLAN.md](../PLAN.md))
 - `year/{year}/US/bea-report.md` — validation and processing summary report
 
 **Note:** interstate factor coefficient (from Exiobase's M matrix — total, direct + upstream) is not stored. coefficient can be derived by trade.amount divided by trade_factor.level
@@ -163,17 +166,6 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 
 <br>
 
-# Investigation in Progress
-
-From March 27, 2026 - AM
-
-- interstate_factor.csv — 68,465,474 rows, 120 Selected Factors (old top-N-by-magnitude scheme, since replaced by aggregation — filtered down
- from 75,369,200 full-factor records)
-- Domestic processing took ~2.5 hours (9,234 seconds) - not yet confirmed, driven by the satellite disaggregation generating 75M state-to-state flow records before filtering to 68M
-- Imports and exports completed quickly (56s and 1,007s) using existing base data
-- BEA API was unavailable (empty response), so those enhancements were skipped
-- FEDEFL uses the official workbook when available and built-in compatible flows as the offline fallback.
-
 # Tables Name and Column Design
 
 For .csv import to SQL
@@ -184,24 +176,7 @@ See our [bea-report.md](https://github.com/ModelEarth/trade-data/blob/main/year/
 
 ## interstate
 
-The state-to-state `interstate` table is similar to the international `trade` table.
-
-<!--
-#### [trade.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/trade.csv) -  trade for country
-
-For entire country (split by domestic, import and export)
-
-trade_id, year, region1, region2, industry1, industry2, amount
-
-- **trade_id**: 5-value composite key (year, region1, region2, industry1, industry2)
-- Links to other tables as primary foreign key
-
-Originates in our [international pull (from Exiobase)](../)
-
-The BEA pull probably does not use the international `trade` table in domestic processing. 
--->
-
-interstate.csv - was [bea_trade_detail.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/bea_trade_detail.csv)
+The state-to-state `interstate` table is similar to the international `trade` table — renamed from the older `bea_trade_detail.csv`.
 
 <!--
 trade_id, bea_commodity_code, bea_industry_code, trade_balance, import_value, export_value, trade_partner_state, transport_mode
@@ -255,7 +230,7 @@ Real per-factor rows only — generated when Exiobase satellite data is availabl
 **Column notes:**
 - `interstate_factor.level` = `interstate.amount × coefficient`, rounded per extension (3dp for water/air_emissions, integer for others). `coefficient` is not stored separately — it is derivable as `level / interstate.amount`. The column is named `level` rather than `levelX` to avoid implying a monetary unit — it is a physical quantity (kg, persons, TJ, etc.).
 - `state_industry_code` is omitted from `interstate_factor` — available via a join to `interstate`.
-- `flow_type` is `inter_state` or `intra_state` (same-state flows are kept, not dropped — see [Schema notes](../README.md#schema-notes-ids-dedup-keys-and-one-database-per-year)).
+- `flow_type` is `inter_state` or `intra_state` (same-state flows are kept, not dropped — see [Schema notes](../README.md#schema-notes)).
 - `employment_impact` is not a column here — when satellite data is available, employment is captured as ordinary Exiobase employment-extension factor rows, not a separate field.
 - `interstate_factor.trade_id` is omitted — the trade relation can be navigated as `interstate_factor → interstate → trade`; note `interstate.sector1`/`sector2` (BEA Sector codes) don't align 1:1 with `trade.industry1`/`industry2` (Exiobase industry codes) — `trade`/`trade_factor` stayed at full industry detail, only `interstate` was aggregated to Sector level.
 - `interstate.state1` and `interstate.state2` are state codes only (e.g. `NY`, `CA`), not prefixed with `US-`.
@@ -277,7 +252,7 @@ Generated instead of `interstate_factor.csv` when Exiobase satellite data is **n
 #### [trade_price_indices.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/trade_price_indices.csv) (Economic Indicators)
 trade_id, import_price_index, export_price_index, exchange_rate, price_year, currency_adjustment_factor
 
-Open question (tracked in [PLAN.md](PLAN.md)): why is the table above empty?
+Open question (tracked in [PLAN.md](../PLAN.md)): why is the table above empty?
 
 ## industry / sector / sector_industry (created by international tradeflow/main.py)
 
@@ -295,24 +270,12 @@ sector_id, industry_id, weight
 `sector_industry` exists because the Exiobase→BEA-Sector mapping is genuinely many-to-many (16/200
 industries chain to more than one candidate Sector, checked empirically) — a single
 `industry.sector_id` column can't represent that. `weight` (per `industry_id`, summing to 1.0) is how
-BEA-Sector-level `trade.csv`/`interstate.csv` amounts split proportionally across an ambiguous
-industry's candidate sectors. See [../PLAN-industry.md](../PLAN-industry.md).
+BEA-Sector-level `interstate.csv` amounts split proportionally across an ambiguous industry's
+candidate sectors. See [../PLAN.md](../PLAN.md).
 
-*Note: `industry.csv` resides at the root of the annual directory (year/2019/industry.csv) and is generated by other Python scripts in the tradeflow folder. The BEA process uses this existing file instead of generating a separate [bea_industry_mapping.csv file](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/bea_industry_mapping.csv) - delete that.  The 'name' column contains the exiobase sector names that were previously in the exiobase_sector column.*
-
-
-## trade_factor_bea
-
-#### trade_factor_bea.csv (BEA-Specific Factors)
-
-trade_id, factor_id, coefficient_value, bea_multiplier, regional_adjustment, data_source
-
-Open question (tracked in [PLAN.md](PLAN.md)): where is the file above?
-
-Similar to [trade_factor.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/trade_factor.csv)
-
-Planned follow-up (tracked in [PLAN.md](PLAN.md)):
-When CSV file and column names are changed above, update [Sample Report from Output](../../../trade-data/bea-dashboard/).
+*Note: `industry.csv` resides at the root of the annual directory (year/{year}/industry.csv) and is
+generated by other Python scripts in the tradeflow folder. `bea_industry_mapping.csv` is no longer
+generated — the BEA process uses this shared file instead.*
 
 
 ## flow
@@ -332,15 +295,15 @@ And in our table naming, "[trade](https://github.com/ModelEarth/trade-data/blob/
 
 IMPORTANT: These won't be needed in SQL since they can be table joins. Useful for .csv static reports.
 
-## export_competitiveness.
+## export_competitiveness
 
-#### [export_competitiveness.csv](https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/year/2019/US/exports/export_competitiveness.csv) (Export Analysis)
-trade_id, revealed_comparative_advantage, export_sophistication_index, market_share, growth_rate
+#### [export_competitiveness.csv](https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/year/2019/US/exports/export_competitiveness.csv) (Export Analysis, generated by trade_competitiveness.py)
+trade_id, industry_exports_total, destination_share, export_intensity, destination_count, export_concentration_hhi
 
 ## import_dependency
 
-#### [import_dependency.csv](https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/year/2019/US/imports/import_dependency.csv) (Import Analysis)
-trade_id, import_penetration_ratio, supply_chain_vulnerability, alternative_suppliers, strategic_importance
+#### [import_dependency.csv](https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/year/2019/US/imports/import_dependency.csv) (Import Analysis, generated by trade_competitiveness.py)
+trade_id, industry_imports_total, source_share, import_intensity, supplier_count, import_concentration_hhi
 
 ## state_industry_impacts
 

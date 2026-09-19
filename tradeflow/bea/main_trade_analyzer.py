@@ -756,7 +756,7 @@ class StateTradeAnalyzer:
             return pd.DataFrame()
 
         # interstate.csv (primary) has sector1/2 (BEA Sector level); interstate-lg.csv
-        # (full detail) has industry1/2 (raw Exiobase industry) — see PLAN-industry.md.
+        # (full detail) has industry1/2 (raw Exiobase industry) — see ../PLAN.md.
         col1 = 'sector1' if 'sector1' in interstate_df.columns else 'industry1'
 
         total = interstate_df['amount'].sum()
@@ -810,7 +810,7 @@ class StateTradeAnalyzer:
             return pd.DataFrame()
 
         # interstate.csv (primary) has sector1/2 (BEA Sector level); interstate-lg.csv
-        # (full detail) has industry1/2 (raw Exiobase industry) — see PLAN-industry.md.
+        # (full detail) has industry1/2 (raw Exiobase industry) — see ../PLAN.md.
         col2 = 'sector2' if 'sector2' in interstate_df.columns else 'industry2'
 
         total = interstate_df['amount'].sum()

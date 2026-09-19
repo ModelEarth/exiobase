@@ -91,11 +91,11 @@ and no download for that prior year already exists locally. The file lands in
 ### 1. **trade.py** - Primary Data Extraction and Processing
 - **Input**: Exiobase Z-matrix (inter-industry flows) and F-matrices (environmental extensions)
 - **Output**: 
-  - `trade.csv` - Core trade flows, full Exiobase industry detail (trade_id, region1, region2, industry1, industry2, amount) — no `year` column; one database per year makes it redundant. Never had a separate Sector-level primary tier — trade/trade_factor were never the file-size problem (see [PLAN-industry.md](PLAN-industry.md)'s revision note).
+  - `trade.csv` - Core trade flows, full Exiobase industry detail (trade_id, region1, region2, industry1, industry2, amount) — no `year` column; one database per year makes it redundant. Never had a separate Sector-level primary tier — trade/trade_factor were never the file-size problem (see [PLAN.md](PLAN.md)'s revision note).
   - `industry.csv` - Raw Exiobase industry mapping with 5-character codes (~200 rows)
-  - `sector.csv` / `sector_industry.csv` - BEA Sector classification (~21 categories) and its many-to-many join to `industry.csv`, used by `interstate.csv`'s Sector-level aggregation — see [PLAN-industry.md](PLAN-industry.md)
+  - `sector.csv` / `sector_industry.csv` - BEA Sector classification (~21 categories) and its many-to-many join to `industry.csv`, used by `interstate.csv`'s Sector-level aggregation — see [PLAN.md](PLAN.md)
   - `factor.csv` - Environmental factor definitions (721 factors)
-  - `trade_factor.csv` - Environmental coefficients (120 selected factors for imports/exports)
+  - `trade_factor.csv` - Environmental coefficients (aggregated flows — ~10 per industry, not a top-N slice; see below)
   - `trade_factor_lg.csv` - All environmental coefficients (721 factors for domestic flows)
 - **Purpose**: Primary script that extracts trade flows and creates environmental impact coefficients
 - **Key Features**: 
@@ -153,7 +153,7 @@ python trade_resource.py
 
 ### File Selection Logic
 - **Domestic flows**: Automatically uses `trade_factor_lg.csv` (all 721 factors) if available
-- **Import/Export flows**: Uses `trade_factor.csv` (120 selected factors) for performance
+- **Import/Export flows**: Uses `trade_factor.csv` (aggregated flows, ~10 per industry) for performance
 - **Smart fallback**: If `_lg` version doesn't exist, falls back to standard version
 
 ## Data Processing Patterns
@@ -249,7 +249,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 ## Performance Optimizations
 
 - **Domestic flows**: All 721 factors (comprehensive analysis feasible)
-- **International flows**: 120 selected factors (performance-optimized)
+- **International flows**: aggregated flows, ~10 per industry (performance-optimized)
 - **Smart file selection**: Automatic `_lg` vs standard file detection
 - **Batch processing**: Multi-level timeout protection with automatic progression
 - **Memory management**: Chunked processing for large datasets

@@ -730,7 +730,7 @@ class USBEATradeFlow:
         """
         Collapse full-detail interstate_df (our ~200-code industry
         granularity) to BEA Sector level (~21 categories) for the small,
-        primary interstate.csv. See PLAN-industry.md and
+        primary interstate.csv. See ../PLAN.md and
         trade.py's aggregate_to_sector (same pattern, applied to state1/
         state2/industry1/industry2 instead of region1/region2/industry1/
         industry2, including the same proportional-split handling for the
@@ -802,7 +802,7 @@ class USBEATradeFlow:
 
         trade.py's trade.csv is always full ~200-industry Exiobase detail —
         it doesn't have a separate BEA-Sector-level primary tier (trade/
-        trade_factor were never the file-size problem; see PLAN-industry.md's
+        trade_factor were never the file-size problem; see ../PLAN.md's
         revision note). interstate/interstate_factor keep the Sector-level
         split, since the state x state disaggregation is what actually
         produces multi-GB files: full-detail results always go to the "-lg"
@@ -1030,7 +1030,7 @@ class USBEATradeFlow:
         level in memory while streaming output_file, then writes that as
         the BEA Sector-level primary file — remapping via the same
         interstate_id map _aggregate_interstate_to_sector built, rather
-        than re-running the satellite factor lookups. See PLAN-industry.md.
+        than re-running the satellite factor lookups. See ../PLAN.md.
         """
         row_count = 0
         factor_cols = ['interstate_id', 'factor_id', 'level', 'flow_type']
@@ -1096,7 +1096,7 @@ class USBEATradeFlow:
         State export competitiveness from domestic interstate.csv (state1=origin state).
 
         See _analyze_state_domestic_flows for the trade_file_override/
-        output_suffix pattern (PLAN-industry.md) — the default call reads
+        output_suffix pattern (../PLAN.md) — the default call reads
         the Sector-level interstate.csv; run() also calls this with
         interstate-lg.csv for the full-detail, uncommitted "-lg" sibling.
         """
@@ -1132,7 +1132,7 @@ class USBEATradeFlow:
         State import dependency from domestic interstate.csv (state2=destination state).
 
         See _analyze_state_domestic_flows for the trade_file_override/
-        output_suffix pattern (PLAN-industry.md).
+        output_suffix pattern (../PLAN.md).
         """
         print("  Analyzing US state import dependency from interstate data...")
 
