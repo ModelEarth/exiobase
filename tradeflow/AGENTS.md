@@ -91,8 +91,9 @@ and no download for that prior year already exists locally. The file lands in
 ### 1. **trade.py** - Primary Data Extraction and Processing
 - **Input**: Exiobase Z-matrix (inter-industry flows) and F-matrices (environmental extensions)
 - **Output**: 
-  - `trade.csv` - Core trade flows (trade_id, region1, region2, industry1, industry2, amount) — no `year` column; one database per year makes it redundant
-  - `industry.csv` - Industry sector mapping with 5-character codes
+  - `trade.csv` - Core trade flows, full Exiobase industry detail (trade_id, region1, region2, industry1, industry2, amount) — no `year` column; one database per year makes it redundant. Never had a separate Sector-level primary tier — trade/trade_factor were never the file-size problem (see [PLAN-industry.md](PLAN-industry.md)'s revision note).
+  - `industry.csv` - Raw Exiobase industry mapping with 5-character codes (~200 rows)
+  - `sector.csv` / `sector_industry.csv` - BEA Sector classification (~21 categories) and its many-to-many join to `industry.csv`, used by `interstate.csv`'s Sector-level aggregation — see [PLAN-industry.md](PLAN-industry.md)
   - `factor.csv` - Environmental factor definitions (721 factors)
   - `trade_factor.csv` - Environmental coefficients (120 selected factors for imports/exports)
   - `trade_factor_lg.csv` - All environmental coefficients (721 factors for domestic flows)
@@ -223,7 +224,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 ## Output Files Structure
 
 ### Core Trade Data
-- **trade.csv**: `trade_id, region1, region2, industry1, industry2, amount` — no `year` column; one database per year makes it redundant
+- **trade.csv**: `trade_id, region1, region2, industry1, industry2, amount` (full Exiobase industry detail) — no `year` column; one database per year makes it redundant.
 
 ### Environmental Impact Data  
 - **trade_factor.csv**: Aggregated flows for imports/exports (see EPA import factor reduction in bea/README.md)

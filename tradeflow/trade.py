@@ -86,7 +86,10 @@ class ExiobaseTradeFlow:
 
         # Load or create sector mapping
         self.sector_mapping = self.load_sector_mapping()
-        
+
+        # Create the BEA Sector table + its many-to-many join to industry.csv
+        self.create_sector_tables()
+
         # Create factors export
         self.create_factors_export()
 
@@ -110,6 +113,23 @@ class ExiobaseTradeFlow:
                 print("Warning: Could not create sector mapping (Exiobase zip unavailable). Using empty mapping.")
                 return {}
             return dict(zip(mapping_df['name'], mapping_df['industry_id']))
+
+    def create_sector_tables(self):
+        """
+        Create sector.csv and sector_industry.csv if they don't exist yet
+        (requires industry.csv, written by load_sector_mapping, to exist).
+        """
+        sectors_file = get_reference_file_path(self.config, 'sectors')
+        sector_industry_file = get_reference_file_path(self.config, 'sector_industry')
+
+        if Path(sectors_file).exists() and Path(sector_industry_file).exists():
+            print("sector.csv and sector_industry.csv already exist")
+            return
+
+        print("Creating sector.csv / sector_industry.csv...")
+        from create_sector_mapping import create_sector_table, create_sector_industry_table
+        create_sector_table()
+        create_sector_industry_table()
 
     def create_factors_export(self):
         """
@@ -165,7 +185,7 @@ class ExiobaseTradeFlow:
 
     def create_trade_factor(self, trade_df, exio_model):
         """
-        Create trade_factor.csv that links each trade flow to environmental factors
+        Create trade_factor.csv that links each trade flow to environmental factors.
         """
         print("Creating trade_factor.csv with real Exiobase factor data...")
         
@@ -363,7 +383,7 @@ class ExiobaseTradeFlow:
                     if output_file.endswith('_lg.csv'):
                         output_file = output_file.replace('_lg.csv', '.csv')
                     file_type = "small"
-                
+
                 trade_factor_df.to_csv(output_file, index=False)
                 print(f"Created {file_type} trade_factor file with {len(trade_factor_df)} factor-trade relationships")
                 print(f"File: {output_file}")
@@ -372,7 +392,8 @@ class ExiobaseTradeFlow:
                 output_file = get_file_path(self.config, 'trade_factor')
                 if output_file.endswith('_lg.csv'):
                     output_file = output_file.replace('_lg.csv', '.csv')
-                pd.DataFrame(columns=['trade_id', 'factor_id', 'level']).to_csv(output_file, index=False)
+                empty = pd.DataFrame(columns=['trade_id', 'factor_id', 'level'])
+                empty.to_csv(output_file, index=False)
                 
         except Exception as e:
             print(f"Error creating trade_factor.csv: {e}")
@@ -610,7 +631,7 @@ class ExiobaseTradeFlow:
         df['trade_id'] = df.index + 1
         # Reorder columns (no 'year' column — one database per year makes it redundant)
         df = df[['trade_id', 'region1', 'region2', 'industry1', 'industry2', 'amount']]
-        
+
         return df
 
     def process_trade_flows(self):
@@ -618,10 +639,10 @@ class ExiobaseTradeFlow:
         Process and format the trade flow data
         """
         print(f"Processing {self.tradeflow_type} flows for {self.year} with {self.country}...")
-        
+
         # Try to download and process real Exiobase data
         exio_model = self.download_and_process_exiobase()
-        
+
         if isinstance(exio_model, pd.DataFrame):
             # Fallback data was returned
             df = exio_model
@@ -632,29 +653,23 @@ class ExiobaseTradeFlow:
             df = self.extract_m_matrix_data(exio_model)
             # Create trade_factor with real data
             self.create_trade_factor(df, exio_model)
-        
+
         # Sort by amount descending to show largest flows first
         df = df.sort_values('amount', ascending=False)
-        
+
         return df
 
     def export_to_csv(self, df):
         """
         Export the processed data to CSV
         """
+        columns_with_id = ['trade_id', 'region1', 'region2', 'industry1', 'industry2', 'amount']
+        columns_no_id = ['region1', 'region2', 'industry1', 'industry2', 'amount']
+
         print(f"Exporting trade.csv data to {self.output_file}...")
-        
-        # Ensure we have the correct column order including trade_id
-        # (no 'year' column — one database per year makes it redundant)
-        if 'trade_id' in df.columns:
-            columns = ['trade_id', 'region1', 'region2', 'industry1', 'industry2', 'amount']
-        else:
-            columns = ['region1', 'region2', 'industry1', 'industry2', 'amount']
+        columns = columns_with_id if 'trade_id' in df.columns else columns_no_id
         df = df[columns]
-        
-        # Export to CSV
         df.to_csv(self.output_file, index=False, float_format='%.2f')
-        
         return len(df)
 
     def run_analysis(self):
@@ -672,7 +687,7 @@ class ExiobaseTradeFlow:
         try:
             # Process the trade flows
             df = self.process_trade_flows()
-            
+
             # Export to CSV
             total_rows = self.export_to_csv(df)
             

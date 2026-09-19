@@ -3,7 +3,7 @@ NOTES:
     CN, DE, FR, GB, IN, IT, JP, KR, US
   2: COUNTRY.list "all" = run all (could take hours)
 TRADEFLOW: domestic,imports,exports
-YEAR: 2019
+YEAR: 2021
 COUNTRY:
   list: US
 NODES:
@@ -64,6 +64,8 @@ FOLDERS:
 FILES:
   factors: factor.csv
   industries: industry.csv
+  sectors: sector.csv
+  sector_industry: sector_industry.csv
   industryflow: trade.csv
   trade_factor: trade_factor.csv
   trade_factor_domestic: trade_factor_lg.csv

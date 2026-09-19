@@ -740,7 +740,8 @@ class StateTradeAnalyzer:
         State-level export competitiveness from interstate.csv.
 
         interstate_df columns: interstate_id, state1 (origin state), state2 (destination state),
-                               industry1, amount (M EUR)
+                               sector1/industry1 (BEA Sector for the primary interstate.csv, raw
+                               Exiobase industry for the full-detail interstate-lg.csv), amount (M EUR)
 
         Metrics per interstate_id:
           state_industry_exports_total : M EUR sent by this state+industry to all destination states
@@ -754,6 +755,10 @@ class StateTradeAnalyzer:
         if interstate_df.empty:
             return pd.DataFrame()
 
+        # interstate.csv (primary) has sector1/2 (BEA Sector level); interstate-lg.csv
+        # (full detail) has industry1/2 (raw Exiobase industry) — see PLAN-industry.md.
+        col1 = 'sector1' if 'sector1' in interstate_df.columns else 'industry1'
+
         total = interstate_df['amount'].sum()
 
         def _hhi(amounts):
@@ -763,19 +768,19 @@ class StateTradeAnalyzer:
             s = amounts / t
             return round(float((s ** 2).sum()), 6)
 
-        state_industry_stats = interstate_df.groupby(['state1', 'industry1']).agg(
+        state_industry_stats = interstate_df.groupby(['state1', col1]).agg(
             state_industry_exports_total=('amount', 'sum'),
             state_destination_count=('state2', 'nunique'),
         )
         state_industry_hhi = (
-            interstate_df.groupby(['state1', 'industry1'])['amount']
+            interstate_df.groupby(['state1', col1])['amount']
             .apply(_hhi)
             .rename('state_export_concentration')
         )
         state_industry_stats = state_industry_stats.join(state_industry_hhi).reset_index()
 
-        result = interstate_df[['interstate_id', 'state1', 'industry1', 'amount']].merge(
-            state_industry_stats, on=['state1', 'industry1']
+        result = interstate_df[['interstate_id', 'state1', col1, 'amount']].merge(
+            state_industry_stats, on=['state1', col1]
         )
         result['state_destination_share'] = (result['amount'] / result['state_industry_exports_total']).round(6)
         result['state_export_intensity'] = (result['state_industry_exports_total'] / total).round(6)
@@ -804,6 +809,10 @@ class StateTradeAnalyzer:
         if interstate_df.empty:
             return pd.DataFrame()
 
+        # interstate.csv (primary) has sector1/2 (BEA Sector level); interstate-lg.csv
+        # (full detail) has industry1/2 (raw Exiobase industry) — see PLAN-industry.md.
+        col2 = 'sector2' if 'sector2' in interstate_df.columns else 'industry2'
+
         total = interstate_df['amount'].sum()
 
         def _hhi(amounts):
@@ -813,19 +822,19 @@ class StateTradeAnalyzer:
             s = amounts / t
             return round(float((s ** 2).sum()), 6)
 
-        state_industry_stats = interstate_df.groupby(['state2', 'industry2']).agg(
+        state_industry_stats = interstate_df.groupby(['state2', col2]).agg(
             state_industry_imports_total=('amount', 'sum'),
             state_supplier_count=('state1', 'nunique'),
         )
         state_industry_hhi = (
-            interstate_df.groupby(['state2', 'industry2'])['amount']
+            interstate_df.groupby(['state2', col2])['amount']
             .apply(_hhi)
             .rename('state_import_concentration')
         )
         state_industry_stats = state_industry_stats.join(state_industry_hhi).reset_index()
 
-        result = interstate_df[['interstate_id', 'state2', 'industry2', 'amount']].merge(
-            state_industry_stats, on=['state2', 'industry2']
+        result = interstate_df[['interstate_id', 'state2', col2, 'amount']].merge(
+            state_industry_stats, on=['state2', col2]
         )
         result['state_source_share'] = (result['amount'] / result['state_industry_imports_total']).round(6)
         result['state_import_intensity'] = (result['state_industry_imports_total'] / total).round(6)

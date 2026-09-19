@@ -8,6 +8,7 @@ import pymrio
 from pathlib import Path
 import re
 from config_loader import load_config, get_reference_file_path
+from exiobase_industry import BEA_SECTOR_NAMES, industry_id_to_sector_weights
 
 def create_sector_mapping():
     """
@@ -141,12 +142,12 @@ def create_sector_mapping():
         sector_mapping.append({
             'industry_id': candidate_id,
             'name': sector_str,
-            'category': category
+            'category': category,
         })
-    
+
     # Create DataFrame
     df = pd.DataFrame(sector_mapping)
-    
+
     # Save to CSV
     output_file = get_reference_file_path(config, 'industries')
     df.to_csv(output_file, index=False)
@@ -164,5 +165,47 @@ def create_sector_mapping():
     
     return df
 
+
+def create_sector_table():
+    """
+    Write sector.csv: the ~21-category BEA Sector table (sector_id, name),
+    referenced by trade.sector1/2 and interstate.sector1/2 via the
+    sector_industry many-to-many join (see PLAN-industry.md,
+    exiobase_industry.py).
+    """
+    config = load_config()
+    rows = [{'sector_id': code, 'name': name} for code, name in BEA_SECTOR_NAMES.items()]
+    df = pd.DataFrame(rows)
+    output_file = get_reference_file_path(config, 'sectors')
+    df.to_csv(output_file, index=False)
+    print(f"Created {output_file} with {len(df)} sectors")
+    return df
+
+
+def create_sector_industry_table():
+    """
+    Write sector_industry.csv: the many-to-many join between BEA Sector
+    (sector.csv) and Exiobase industry (industry.csv), with a weight column
+    (fraction of an industry's amount attributed to that sector — see
+    exiobase_industry.industry_id_to_sector_weights). Requires industry.csv
+    to already exist (create_sector_mapping must run first).
+    """
+    config = load_config()
+    industry_csv_path = get_reference_file_path(config, 'industries')
+    weights = industry_id_to_sector_weights(industry_csv_path)
+    rows = [
+        {'sector_id': sector_code, 'industry_id': industry_id, 'weight': weight}
+        for industry_id, sector_weights in weights.items()
+        for sector_code, weight in sector_weights
+    ]
+    df = pd.DataFrame(rows)
+    output_file = get_reference_file_path(config, 'sector_industry')
+    df.to_csv(output_file, index=False)
+    print(f"Created {output_file} with {len(df)} sector/industry pairs")
+    return df
+
+
 if __name__ == "__main__":
     create_sector_mapping()
+    create_sector_table()
+    create_sector_industry_table()

@@ -35,6 +35,7 @@ from config_loader import load_config, get_file_path, get_reference_file_path
 from main_api_client import BEAAPIClient
 from main_trade_analyzer import StateTradeAnalyzer
 from main_fedefl_integration import FEDEFLIntegrator
+from exiobase_industry import industry_id_to_sector_weights
 
 BEA_ORIGIN_ALLOCATION_LINES = {
     'agriculture': ('SAGDP2', 3, 'GDP by state: Agriculture, forestry, fishing and hunting'),
@@ -228,10 +229,22 @@ class USBEATradeFlow:
         elif tradeflow == 'exports':
             print(f"\nPhase 3: US state export competitiveness analysis...")
             self._analyze_state_export_competitiveness()
+
+            domestic_folder = Path(get_file_path(self.config, 'industryflow', tradeflow_type='domestic')).parent
+            lg_interstate_file = domestic_folder / 'interstate-lg.csv'
+            if lg_interstate_file.exists():
+                print(f"\nPhase 3b: US state export competitiveness analysis (full industry detail, -lg)...")
+                self._analyze_state_export_competitiveness(interstate_file_override=str(lg_interstate_file), output_suffix='-lg')
         elif tradeflow == 'imports':
             print(f"\nPhase 3: US import dependency analysis...")
             self._analyze_import_dependency()
-            
+
+            domestic_folder = Path(get_file_path(self.config, 'industryflow', tradeflow_type='domestic')).parent
+            lg_interstate_file = domestic_folder / 'interstate-lg.csv'
+            if lg_interstate_file.exists():
+                print(f"\nPhase 3b: US import dependency analysis (full industry detail, -lg)...")
+                self._analyze_import_dependency(interstate_file_override=str(lg_interstate_file), output_suffix='-lg')
+
         # Phase 4: FEDEFL integration (after trade data is established)
         print(f"\nPhase 4: US-FEDEFL flow integration...")
         self._integrate_fedefl_flows()
@@ -713,8 +726,99 @@ class USBEATradeFlow:
 
         return enhanced
     
+    def _aggregate_interstate_to_sector(self, interstate_df):
+        """
+        Collapse full-detail interstate_df (our ~200-code industry
+        granularity) to BEA Sector level (~21 categories) for the small,
+        primary interstate.csv. See PLAN-industry.md and
+        trade.py's aggregate_to_sector (same pattern, applied to state1/
+        state2/industry1/industry2 instead of region1/region2/industry1/
+        industry2, including the same proportional-split handling for the
+        16/200 industries with more than one candidate Sector).
+        commodity_code/industry_code/economic_multiplier are dropped back to
+        their fallback defaults ('', '', 1.0) — no single value is
+        well-defined once multiple original industries collapse into one
+        Sector row.
+
+        Returns (primary_interstate_df, interstate_id_map) where
+        interstate_id_map maps each original interstate_id to a list of (new
+        interstate_id, weight) pairs — weights summing to 1.0 — for the
+        caller to split/remap interstate_factor rows the same way without
+        redoing the satellite factor lookups.
+        """
+        industries_path = get_reference_file_path(self.config, 'industries')
+        sector_weights = industry_id_to_sector_weights(industries_path)
+
+        weights_rows = [
+            (industry_id, sector, weight)
+            for industry_id, candidates in sector_weights.items()
+            for sector, weight in candidates
+        ]
+        weights_df = pd.DataFrame(weights_rows, columns=['industry_id', 'sector', 'weight'])
+
+        exploded = interstate_df.merge(
+            weights_df.rename(columns={'industry_id': 'industry1', 'sector': 'sector1', 'weight': 'weight1'}),
+            on='industry1', how='inner',
+        ).merge(
+            weights_df.rename(columns={'industry_id': 'industry2', 'sector': 'sector2', 'weight': 'weight2'}),
+            on='industry2', how='inner',
+        )
+        dropped = len(interstate_df) - exploded['interstate_id'].nunique()
+        if dropped > 0:
+            print(f"    Warning: {dropped} interstate rows have an industry with no BEA Sector mapping, dropping from sector-level output")
+
+        exploded['fractional_amount'] = exploded['amount'] * exploded['weight1'] * exploded['weight2']
+
+        grouped = (
+            exploded.groupby(['state1', 'state2', 'sector1', 'sector2', 'state_industry_code'], as_index=False)
+            .agg(amount=('fractional_amount', 'sum'), trade_id=('trade_id', 'first'))
+        )
+        grouped['interstate_id'] = (
+            grouped['trade_id'].astype(str) + '-US-' + grouped['state1'] + '-US-' + grouped['state2']
+            + '-' + grouped['sector1'] + '-' + grouped['sector2']
+        )
+        grouped['commodity_code'] = ''
+        grouped['industry_code'] = ''
+        grouped['economic_multiplier'] = 1.0
+
+        exploded['combined_weight'] = exploded['weight1'] * exploded['weight2']
+        merged = exploded[['interstate_id', 'state1', 'state2', 'sector1', 'sector2', 'state_industry_code', 'combined_weight']].merge(
+            grouped[['state1', 'state2', 'sector1', 'sector2', 'state_industry_code', 'interstate_id']]
+            .rename(columns={'interstate_id': 'new_interstate_id'}),
+            on=['state1', 'state2', 'sector1', 'sector2', 'state_industry_code'],
+            how='left',
+        )
+        interstate_id_map = {}
+        for old_id, new_id, weight in zip(merged['interstate_id'], merged['new_interstate_id'], merged['combined_weight']):
+            interstate_id_map.setdefault(old_id, []).append((new_id, weight))
+
+        columns = ['interstate_id', 'trade_id', 'state1', 'state2', 'sector1', 'sector2',
+                   'state_industry_code', 'amount', 'commodity_code', 'industry_code', 'economic_multiplier']
+        return grouped[columns], interstate_id_map
+
     def _analyze_state_domestic_flows(self):
-        """Analyze US state-to-state domestic trade flows"""
+        """
+        Analyze US state-to-state domestic trade flows.
+
+        trade.py's trade.csv is always full ~200-industry Exiobase detail —
+        it doesn't have a separate BEA-Sector-level primary tier (trade/
+        trade_factor were never the file-size problem; see PLAN-industry.md's
+        revision note). interstate/interstate_factor keep the Sector-level
+        split, since the state x state disaggregation is what actually
+        produces multi-GB files: full-detail results always go to the "-lg"
+        siblings (interstate-lg.csv/interstate_factor-lg.csv/...), not
+        committed, and are then aggregated to BEA Sector level (~21
+        categories) — mapping industry1/industry2 to Sector codes, re-summing
+        amount/level for rows that now share a (state1, state2, sector1,
+        sector2)/factor_id key via an old→new interstate_id map — for the
+        small, primary interstate.csv/interstate_factor.csv actually
+        committed. commodity_code/industry_code/economic_multiplier (from
+        _merge_bea_domestic, keyed on our fine-grained industry_id) don't
+        have one well-defined value once multiple original industries
+        collapse into a Sector, so the primary output leaves them at their
+        fallback defaults ('', '', 1.0) rather than a fine-grained value that
+        can't attribute to the coarser row.
+        """
         print("  Analyzing US state-to-state flows...")
 
         # Update config for current tradeflow
@@ -722,9 +826,12 @@ class USBEATradeFlow:
         self.config['TRADEFLOW'] = self.current_tradeflow
 
         try:
-            # Load base trade data
-            trade_file_str = get_file_path(self.config, 'industryflow')
-            trade_file = Path(trade_file_str)
+            # get_satellite_aggregate_entries() factor lookups are keyed by
+            # our original Exiobase-derived industry_id, which trade.csv
+            # always has (see docstring) — no full-detail sibling to prefer.
+            trade_file = Path(get_file_path(self.config, 'industryflow'))
+            aggregate_to_primary = True
+            output_suffix = '-lg'
 
             if trade_file.exists():
                 base_trade = pd.read_csv(trade_file)
@@ -824,8 +931,14 @@ class USBEATradeFlow:
                     ]
                 ]
 
-                interstate_df.to_csv(output_path / 'interstate.csv', index=False)
-                print(f"    ✅ Created interstate.csv ({len(interstate_df)} state-pair rows)")
+                interstate_df.to_csv(output_path / f'interstate{output_suffix}.csv', index=False)
+                print(f"    ✅ Created interstate{output_suffix}.csv ({len(interstate_df)} state-pair rows)")
+
+                interstate_id_map = None
+                if aggregate_to_primary:
+                    primary_interstate_df, interstate_id_map = self._aggregate_interstate_to_sector(interstate_df)
+                    primary_interstate_df.to_csv(output_path / 'interstate.csv', index=False)
+                    print(f"    ✅ Created interstate.csv ({len(primary_interstate_df)} state-pair rows, BEA Sector level)")
 
                 if has_satellite and '_industry1' in state_flows.columns:
                     # Round: 3 decimals for water/air_emissions, 0 for other extensions
@@ -848,22 +961,50 @@ class USBEATradeFlow:
                         print(f"    ✅ Created {lg_file} ({lg_count} rows, all factors)")
 
                     # Default file: EPA-style aggregated flows, not a top-N-by-magnitude
-                    # slice — see exiobase_factors.py.
+                    # slice — see exiobase_factors.py. When aggregate_to_primary,
+                    # also remaps/re-sums to the BEA Sector-level primary file
+                    # via interstate_id_map, in the same pass (no second
+                    # satellite lookup).
                     factor_count = self._write_interstate_factor_file(
                         state_flows,
-                        output_path / 'interstate_factor.csv',
+                        output_path / f'interstate_factor{output_suffix}.csv',
                         ext_by_factor,
                         use_aggregate=True,
+                        interstate_id_map=interstate_id_map,
+                        primary_output_file=(output_path / 'interstate_factor.csv') if aggregate_to_primary else None,
                     )
-                    print(f"    ✅ Created interstate_factor.csv ({factor_count} rows, aggregated flows)")
+                    print(f"    ✅ Created interstate_factor{output_suffix}.csv ({factor_count} rows, aggregated flows)")
                 else:
                     # No satellite data: no real per-factor breakdown is
                     # possible, so there's no interstate_factor.csv this run —
                     # only the interstate_estimate.csv leftovers (factor_id/
                     # coefficient in the source data are fixed placeholders
                     # -1/1.0, not real per-factor values, so they're excluded).
-                    interstate_estimate_df.to_csv(output_path / 'interstate_estimate.csv', index=False)
-                    print(f"    ✅ Created interstate_estimate.csv ({len(interstate_estimate_df)} rows)")
+                    interstate_estimate_df.to_csv(output_path / f'interstate_estimate{output_suffix}.csv', index=False)
+                    print(f"    ✅ Created interstate_estimate{output_suffix}.csv ({len(interstate_estimate_df)} rows)")
+                    if aggregate_to_primary and interstate_id_map is not None:
+                        # employment_impact is an absolute quantity (like amount/level),
+                        # so an ambiguous old interstate_id's value is split across its
+                        # new ones by weight, like everywhere else in this aggregation —
+                        # then summed for new ids that receive contributions from more
+                        # than one old row. flow_type is identical across a collapsed
+                        # group (state1/state2 don't change during Sector aggregation),
+                        # so 'first' is exact.
+                        id_map_rows = [
+                            (old_id, new_id, weight)
+                            for old_id, targets in interstate_id_map.items()
+                            for new_id, weight in targets
+                        ]
+                        id_map_df = pd.DataFrame(id_map_rows, columns=['interstate_id', 'new_interstate_id', 'weight'])
+                        primary_estimate = interstate_estimate_df.merge(id_map_df, on='interstate_id', how='inner')
+                        primary_estimate['employment_impact'] = primary_estimate['employment_impact'] * primary_estimate['weight']
+                        primary_estimate = primary_estimate.groupby('new_interstate_id', as_index=False).agg(
+                            employment_impact=('employment_impact', 'sum'),
+                            flow_type=('flow_type', 'first'),
+                        )
+                        primary_estimate = primary_estimate.rename(columns={'new_interstate_id': 'interstate_id'})
+                        primary_estimate.to_csv(output_path / 'interstate_estimate.csv', index=False)
+                        print(f"    ✅ Created interstate_estimate.csv ({len(primary_estimate)} rows, BEA Sector level)")
 
                 state_impacts.to_csv(output_path / 'state_industry_impacts.csv', index=False)
                 print(f"    Created US state domestic flow analysis")
@@ -875,16 +1016,25 @@ class USBEATradeFlow:
             # Restore original config
             self.config['TRADEFLOW'] = original_tradeflow
 
-    def _write_interstate_factor_file(self, state_flows, output_file, ext_by_factor, use_aggregate=True):
+    def _write_interstate_factor_file(self, state_flows, output_file, ext_by_factor, use_aggregate=True,
+                                       interstate_id_map=None, primary_output_file=None):
         """Stream interstate factor rows without materializing the full factor table.
 
         use_aggregate=True (the default file): EPA-style aggregated flows
         (get_satellite_aggregate_entries — see exiobase_factors.py).
         use_aggregate=False (the "_lg" file): every raw per-stressor factor,
         unaggregated (get_satellite_factor_entries).
+
+        When interstate_id_map/primary_output_file are given, also
+        accumulates each row's (new_interstate_id, factor_id) -> summed
+        level in memory while streaming output_file, then writes that as
+        the BEA Sector-level primary file — remapping via the same
+        interstate_id map _aggregate_interstate_to_sector built, rather
+        than re-running the satellite factor lookups. See PLAN-industry.md.
         """
         row_count = 0
         factor_cols = ['interstate_id', 'factor_id', 'level', 'flow_type']
+        primary_totals = {}  # (new_interstate_id, factor_id) -> [level_sum, flow_type]
 
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -898,6 +1048,11 @@ class USBEATradeFlow:
                 else:
                     entries = self.state_analyzer.get_satellite_factor_entries(industry_id, limit=None)
 
+                # An ambiguous old interstate_id (industry1/industry2 chaining
+                # to more than one candidate Sector) maps to multiple new
+                # ones, weights summing to 1.0 — see _aggregate_interstate_to_sector.
+                new_targets = interstate_id_map.get(interstate_id) if interstate_id_map is not None else None
+
                 for factor_id, coefficient in entries:
                     level = float(amount) * float(coefficient)
                     extension = ext_by_factor.get(factor_id)
@@ -910,10 +1065,41 @@ class USBEATradeFlow:
                     writer.writerow([interstate_id, factor_id, level_out, flow_type])
                     row_count += 1
 
+                    if new_targets:
+                        for new_id, weight in new_targets:
+                            if new_id is None or pd.isna(new_id):
+                                continue
+                            key = (new_id, factor_id)
+                            weighted_level = level * weight
+                            if key in primary_totals:
+                                primary_totals[key][0] += weighted_level
+                            else:
+                                primary_totals[key] = [weighted_level, flow_type]
+
+        if primary_output_file is not None:
+            with open(primary_output_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(factor_cols)
+                for (new_id, factor_id), (level_sum, flow_type) in primary_totals.items():
+                    extension = ext_by_factor.get(factor_id)
+                    if extension in ('water', 'air_emissions') or pd.isna(extension):
+                        level_out = round(level_sum, 3)
+                    else:
+                        level_out = int(round(level_sum))
+                    writer.writerow([new_id, factor_id, level_out, flow_type])
+            print(f"    ✅ Created {Path(primary_output_file).name} ({len(primary_totals)} rows, BEA Sector level)")
+
         return row_count
     
-    def _analyze_state_export_competitiveness(self):
-        """State export competitiveness from domestic interstate.csv (state1=origin state)."""
+    def _analyze_state_export_competitiveness(self, interstate_file_override=None, output_suffix=''):
+        """
+        State export competitiveness from domestic interstate.csv (state1=origin state).
+
+        See _analyze_state_domestic_flows for the trade_file_override/
+        output_suffix pattern (PLAN-industry.md) — the default call reads
+        the Sector-level interstate.csv; run() also calls this with
+        interstate-lg.csv for the full-detail, uncommitted "-lg" sibling.
+        """
         print("  Analyzing US state export competitiveness from interstate data...")
 
         original_tradeflow = self.config['TRADEFLOW']
@@ -921,10 +1107,10 @@ class USBEATradeFlow:
 
         try:
             trade_file = Path(get_file_path(self.config, 'industryflow'))
-            interstate_file = trade_file.parent / 'interstate.csv'
+            interstate_file = Path(interstate_file_override) if interstate_file_override else trade_file.parent / 'interstate.csv'
 
             if not interstate_file.exists():
-                print(f"    interstate.csv not found at {interstate_file} — skipping state export competitiveness")
+                print(f"    {interstate_file.name} not found at {interstate_file} — skipping state export competitiveness")
                 return
 
             interstate_df = pd.read_csv(interstate_file)
@@ -933,15 +1119,21 @@ class USBEATradeFlow:
             if not competitiveness.empty:
                 output_path = trade_file.parent
                 output_path.mkdir(parents=True, exist_ok=True)
-                competitiveness.to_csv(output_path / 'export_competitiveness_state.csv', index=False)
-                print(f"    ✅ Created export_competitiveness_state.csv ({len(competitiveness)} rows)")
+                out_name = f'export_competitiveness_state{output_suffix}.csv'
+                competitiveness.to_csv(output_path / out_name, index=False)
+                print(f"    ✅ Created {out_name} ({len(competitiveness)} rows)")
         except Exception as e:
             print(f"    Error in state export competitiveness analysis: {e}")
         finally:
             self.config['TRADEFLOW'] = original_tradeflow
 
-    def _analyze_import_dependency(self):
-        """State import dependency from domestic interstate.csv (state2=destination state)."""
+    def _analyze_import_dependency(self, interstate_file_override=None, output_suffix=''):
+        """
+        State import dependency from domestic interstate.csv (state2=destination state).
+
+        See _analyze_state_domestic_flows for the trade_file_override/
+        output_suffix pattern (PLAN-industry.md).
+        """
         print("  Analyzing US state import dependency from interstate data...")
 
         original_tradeflow = self.config['TRADEFLOW']
@@ -949,10 +1141,10 @@ class USBEATradeFlow:
 
         try:
             trade_file = Path(get_file_path(self.config, 'industryflow'))
-            interstate_file = trade_file.parent / 'interstate.csv'
+            interstate_file = Path(interstate_file_override) if interstate_file_override else trade_file.parent / 'interstate.csv'
 
             if not interstate_file.exists():
-                print(f"    interstate.csv not found at {interstate_file} — skipping state import dependency")
+                print(f"    {interstate_file.name} not found at {interstate_file} — skipping state import dependency")
                 return
 
             interstate_df = pd.read_csv(interstate_file)
@@ -961,9 +1153,10 @@ class USBEATradeFlow:
             if not dependency.empty:
                 output_path = trade_file.parent
                 output_path.mkdir(parents=True, exist_ok=True)
-                dependency.to_csv(output_path / 'import_dependency_state.csv', index=False)
-                
-                print(f"    ✅ Created import_dependency_state.csv ({len(dependency)} rows)")
+                out_name = f'import_dependency_state{output_suffix}.csv'
+                dependency.to_csv(output_path / out_name, index=False)
+
+                print(f"    ✅ Created {out_name} ({len(dependency)} rows)")
         except Exception as e:
             print(f"    Error in state import dependency analysis: {e}")
         finally:
