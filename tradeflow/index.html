@@ -263,7 +263,7 @@ waitForLocalsiteJs();
       <div class="schema-panel-menu-wrap">
         <button type="button" class="schema-panel-menu-btn" id="schemaPanelMenuBtn" title="Schema options" aria-label="Schema options">&#8943;</button>
         <div class="schema-menu" id="schemaPanelMenu">
-          <a href="#" id="schemaMenuLayoutJson">Layout Json</a>
+          <a href="#" id="schemaMenuMyLayoutJson">My Layout JSON</a>
         </div>
       </div>
     </div>
@@ -536,7 +536,7 @@ waitForLocalsiteJs();
   // Default layout positions for each table box. interstate_estimate's entry
   // is commented out along with the rest of its schema-display presence
   // below — see getStaticSchema(). To publish a saved arrangement for other
-  // users, paste the "Layout Json" (from the schema panel's ⋮ menu) over
+  // users, paste "My Layout JSON" (from the schema panel's ⋮ menu) over
   // this object.
   const DEFAULT_LAYOUT = {"industry":{"x":31,"y":53},"sector":{"x":32,"y":332},"sector_industry":{"x":33,"y":190},"factor":{"x":777,"y":215},"trade":{"x":299,"y":5},"trade_factor":{"x":557,"y":20},"interstate":{"x":299,"y":338},"interstate_factor":{"x":557,"y":399}}
 
@@ -859,11 +859,23 @@ waitForLocalsiteJs();
     loadSchemaDiagram();
   });
 
-  // ---- Schema panel ⋮ menu: export the current table layout as JSON ----
+  // Reads only this browser's saved drag positions (localStorage) — null if
+  // nothing has been dragged here yet, as opposed to getSavedLayout() which
+  // fills gaps from DEFAULT_LAYOUT.
+  function getMySessionLayout() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
+      return (saved && typeof saved === 'object') ? saved : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ---- Schema panel ⋮ menu: export this browser's table layout as JSON ----
   function setupSchemaPanelMenu() {
     const menuBtn  = document.getElementById('schemaPanelMenuBtn');
     const menu     = document.getElementById('schemaPanelMenu');
-    const copyLink = document.getElementById('schemaMenuLayoutJson');
+    const copyLink = document.getElementById('schemaMenuMyLayoutJson');
     if (!menuBtn || !menu || !copyLink) return;
 
     menuBtn.addEventListener('click', e => {
@@ -880,16 +892,19 @@ waitForLocalsiteJs();
     copyLink.addEventListener('click', e => {
       e.preventDefault();
       menu.style.display = 'none';
-      const json = JSON.stringify(getSavedLayout());
+      const mySaved = getMySessionLayout();
+      const json = JSON.stringify(mySaved || getSavedLayout());
       const where = 'the "const DEFAULT_LAYOUT = {...}" line in exiobase/tradeflow/index.html '
         + '(inside the <script> near renderSchemaDiagram)';
+      const note = mySaved ? '' : '\n\n(You haven\'t dragged any tables in this browser yet, '
+        + 'so this is still the file\'s default layout.)';
 
       function done(copied) {
         alert(copied
-          ? 'Layout JSON copied to clipboard.\n\nPaste it over ' + where
-            + ' to save this table arrangement for other users.'
+          ? 'Your layout JSON copied to clipboard.\n\nPaste it over ' + where
+            + ' to save this table arrangement for other users.' + note
           : 'Could not copy automatically — copy this JSON and paste it over '
-            + where + ':\n\n' + json);
+            + where + ':\n\n' + json + note);
       }
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
