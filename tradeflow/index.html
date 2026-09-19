@@ -358,6 +358,10 @@ waitForLocalsiteJs();
     switch (tableName) {
       case 'industry':
         return `year/${year}/industry.csv`;
+      case 'sector':
+        return `year/${year}/sector.csv`;
+      case 'sector_industry':
+        return `year/${year}/sector_industry.csv`;
       case 'factor':
         return `year/${year}/factor.csv`;
       case 'trade':
@@ -365,12 +369,15 @@ waitForLocalsiteJs();
       case 'trade_factor':
         return `year/${year}/${country}/${flowType}/trade_factor.csv`;
       case 'interstate':
-        return `year/${year}/US/domestic/bea_trade_detail.csv`;
+        return `year/${year}/US/domestic/interstate.csv`;
       case 'interstate_factor':
+        return `year/${year}/US/domestic/interstate_factor.csv`;
       case 'interstate_estimate':
-        // Same file: whichever of the two tables got the data, depending on
-        // whether satellite factor data was available for this run.
-        return `year/${year}/US/domestic/state_trade_flows.csv`;
+        // Commented out of the schema display (see getStaticSchema()) since
+        // it's mutually exclusive with interstate_factor and no run so far
+        // has lacked satellite data, but kept correct here in case it's
+        // re-enabled.
+        return `year/${year}/US/domestic/interstate_estimate.csv`;
       default:
         return `year/${year}`;
     }
