@@ -30,7 +30,11 @@ Trade is traditionally called flow, but the term lacks clarity when relating ann
 
 Later, the 6-character "commodity" sectors can reside in the 5-character "trade" tables, or in tables starting with "commodity".
 
-Combing state-to-state consumption: [Exiobase plus BEA](bea) based on the [USEEIO repo](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors)
+## State-to-State: interstate, factor, sector
+
+The use of 21 Sector categories instead of 200 Industry categories allows us to reduce interstate_factor tables from 9 GB to 76 MB.
+
+Combing state-to-state consumption: [Exiobase plus BEA](bea) based on the [USEEIO repo](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) and newer [Cornerstone repos](https://github.com/cornerstone-data)
 
 ## Processing
 
