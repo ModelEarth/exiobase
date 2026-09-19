@@ -793,7 +793,11 @@ waitForLocalsiteJs();
       if (!drag) return;
       drag = null;
       svg.style.cursor = '';
-      try { localStorage.setItem('industry-schema-positions', JSON.stringify(layout)); } catch(e) {}
+      try {
+        localStorage.setItem('industry-schema-positions', JSON.stringify(layout));
+      } catch (e) {
+        console.warn('Could not save table position to localStorage (drag will not persist):', e);
+      }
     }
 
     // Clean up listeners from any previous render
@@ -867,7 +871,24 @@ waitForLocalsiteJs();
       const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
       return (saved && typeof saved === 'object') ? saved : null;
     } catch (e) {
+      console.warn('Could not read industry-schema-positions from localStorage:', e);
       return null;
+    }
+  }
+
+  // Some browsers (Safari in particular, and most browsers in private
+  // browsing) block localStorage for pages opened directly via file:// —
+  // dragging then silently fails to persist. Feature-detect so the export
+  // menu can tell that case apart from "nothing dragged yet".
+  function localStorageWorks() {
+    try {
+      const k = '__schema_ls_test__';
+      localStorage.setItem(k, '1');
+      const ok = localStorage.getItem(k) === '1';
+      localStorage.removeItem(k);
+      return ok;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -892,12 +913,19 @@ waitForLocalsiteJs();
     copyLink.addEventListener('click', e => {
       e.preventDefault();
       menu.style.display = 'none';
-      const mySaved = getMySessionLayout();
+      const storageOk = localStorageWorks();
+      const mySaved = storageOk ? getMySessionLayout() : null;
       const json = JSON.stringify(mySaved || getSavedLayout());
       const where = 'the "const DEFAULT_LAYOUT = {...}" line in exiobase/tradeflow/index.html '
         + '(inside the <script> near renderSchemaDiagram)';
-      const note = mySaved ? '' : '\n\n(You haven\'t dragged any tables in this browser yet, '
-        + 'so this is still the file\'s default layout.)';
+      const note = mySaved
+        ? ''
+        : !storageOk
+          ? '\n\n(This browser is blocking local storage for this page — common when opening the '
+            + 'file directly via file://, or in private/incognito mode — so dragged positions can\'t '
+            + 'be saved here. Try running the page from a local server instead.)'
+          : '\n\n(You haven\'t dragged any tables in this browser yet, '
+            + 'so this is still the file\'s default layout.)';
 
       function done(copied) {
         alert(copied
