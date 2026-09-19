@@ -4,7 +4,7 @@
 
 The US-BEA data integration here combines Exiobase MRIO data with US Bureau of Economic Analysis API data to generate relational trade flow tables. This system extends our existing exiobase/tradeflow architecture to include detailed US trade analysis with enhanced state-level and industry-specific insights. Developed by referencing [US generate_import_factors.py](https://github.com/USEPA/USEEIO/tree/master/import_emission_factors) — that USEPA org's active development has since moved to [cornerstone-data](https://github.com/cornerstone-data) (see "Beyond GHGs" below for what we've found there so far).
 
-Our own industry classification (~200 codes, derived from Exiobase's raw sectors) has never been reconciled with BEA's official classifications (Detail ~405-411, Summary ~71-73, Sector ~21) that EPA's own process computes and publishes against — see [../PLAN.md](../PLAN.md) for the scoped plan to fix that, including the authoritative BEA source for the Sector-level crosswalk ([`apps.bea.gov/industry/release/zip/SUPPLY-USE.zip`](https://apps.bea.gov/industry/release/zip/SUPPLY-USE.zip), `Use_SUT_Framework_{year}_DET.xlsx`, sheet "NAICS Codes" — confirmed via `useeior`'s own build scripts) and the file-size-driven `-lg`/primary two-tier split this feeds into.
+Our own industry classification (~200 codes, derived from Exiobase's raw sectors) has never been reconciled with BEA's official classifications (Detail ~405-411, Summary ~71-73, Sector ~21) that EPA's own process computes and publishes against — see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md) for the scoped plan to fix that, including the authoritative BEA source for the Sector-level crosswalk ([`apps.bea.gov/industry/release/zip/SUPPLY-USE.zip`](https://apps.bea.gov/industry/release/zip/SUPPLY-USE.zip), `Use_SUT_Framework_{year}_DET.xlsx`, sheet "NAICS Codes" — confirmed via `useeior`'s own build scripts) and the file-size-driven `-lg`/primary two-tier split this feeds into.
 
 ### BEA Factor Aggregation
 
@@ -33,7 +33,7 @@ How our factor selection compares to EPA USEEIO's [import_emission_factors](http
 
 **Differs by design (different output goal):**
 - **Row-level detail, not regional aggregation.** EPA pre-aggregates countries into 7 import-weighted regions, one row per (sector, region, flow). We keep one row per actual trade flow — aggregated only across raw stressors within a flow, not across flows or countries. A regional rollup is a GROUP BY away, not baked into the pipeline.
-- **Currency** — EPA converts EUR to USD; ours stays in Euros (see [../PLAN.md](../PLAN.md)).
+- **Currency** — EPA converts EUR to USD; ours stays in Euros (see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md)).
 - **Country/sector mapping** — EPA uses MRIO-to-USEEIO concordance files; we map to our own industry_id, since our tables aren't scoped to the USEEIO model.
 
 **Beyond EPA's own product:** EPA's factors only cover these 5 GHG flows. Our employment/energy/land/material/water flows (factor_id 906-910) are extra — not something EPA's methodology defines or that we're matching against. See below.
@@ -104,7 +104,7 @@ TO DO: We need to add a euro_dollar lookup by year.
 
 ### Reports
 - [Sankey](../../../profile/trade/map/sankey.html)
-- [Sample Report from Output](../../../trade-data/bea-dashboard/) — still references pre-rename column names, needs updating (see ../PLAN.md)
+- [Sample Report from Output](../../../trade-data/bea-dashboard/) — still references pre-rename column names, needs updating (see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md))
 - State-to-state domestic trade flows (interstate.csv)
 - State export competitiveness analysis (export_competitiveness.csv)
 - Import dependency by state (import_dependency.csv)
@@ -144,7 +144,7 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 - `year/{year}/US/domestic/interstate_factor.csv` — real per-factor state-level flows (satellite data available)
 - `year/{year}/US/domestic/interstate_factor_lg.csv` — same as above with all 721 factors (generated when `use_partial_factors_interstate: false` in `config.yaml`)
 - `year/{year}/US/domestic/interstate_estimate.csv` — no-satellite-fallback leftover fields (satellite data unavailable); mutually exclusive with `interstate_factor.csv` per flow
-- `year/{year}/US/domestic/trade_price_indices.csv` — trade price indices (currently empty; see [PLAN.md](../PLAN.md))
+- `year/{year}/US/domestic/trade_price_indices.csv` — trade price indices (currently empty; see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md))
 - `year/{year}/US/bea-report.md` — validation and processing summary report
 
 **Note:** interstate factor coefficient (from Exiobase's M matrix — total, direct + upstream) is not stored. coefficient can be derived by trade.amount divided by trade_factor.level
@@ -252,7 +252,7 @@ Generated instead of `interstate_factor.csv` when Exiobase satellite data is **n
 #### [trade_price_indices.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/trade_price_indices.csv) (Economic Indicators)
 trade_id, import_price_index, export_price_index, exchange_rate, price_year, currency_adjustment_factor
 
-Open question (tracked in [PLAN.md](../PLAN.md)): why is the table above empty?
+Open question (tracked in [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md)): why is the table above empty?
 
 ## industry / sector / sector_industry (created by international tradeflow/main.py)
 
@@ -271,7 +271,7 @@ sector_id, industry_id, weight
 industries chain to more than one candidate Sector, checked empirically) — a single
 `industry.sector_id` column can't represent that. `weight` (per `industry_id`, summing to 1.0) is how
 BEA-Sector-level `interstate.csv` amounts split proportionally across an ambiguous industry's
-candidate sectors. See [../PLAN.md](../PLAN.md).
+candidate sectors. See [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md).
 
 *Note: `industry.csv` resides at the root of the annual directory (year/{year}/industry.csv) and is
 generated by other Python scripts in the tradeflow folder. `bea_industry_mapping.csv` is no longer

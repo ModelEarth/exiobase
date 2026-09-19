@@ -7,9 +7,9 @@ rename, and dropping `bea_industry_mapping.csv`. See
 
 ## Open
 
-- **trade_price_indices.csv is still empty** — see ../PLAN.md.
+- **trade_price_indices.csv is still empty** — see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md).
 - **BEA sample dashboard** (../../../trade-data/bea-dashboard/) needs
   updating for the renamed interstate/sector columns.
 
-See ../PLAN.md for longer-term ideas (profiling, a public API,
+See [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md) for longer-term ideas (profiling, a public API,
 forecasting) that aren't started yet.

@@ -91,9 +91,9 @@ and no download for that prior year already exists locally. The file lands in
 ### 1. **trade.py** - Primary Data Extraction and Processing
 - **Input**: Exiobase Z-matrix (inter-industry flows) and F-matrices (environmental extensions)
 - **Output**: 
-  - `trade.csv` - Core trade flows, full Exiobase industry detail (trade_id, region1, region2, industry1, industry2, amount) — no `year` column; one database per year makes it redundant. Never had a separate Sector-level primary tier — trade/trade_factor were never the file-size problem (see [PLAN.md](PLAN.md)'s revision note).
+  - `trade.csv` - Core trade flows, full Exiobase industry detail (trade_id, region1, region2, industry1, industry2, amount) — no `year` column; one database per year makes it redundant. Never had a separate Sector-level primary tier — trade/trade_factor were never the file-size problem (see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md)'s revision note).
   - `industry.csv` - Raw Exiobase industry mapping with 5-character codes (~200 rows)
-  - `sector.csv` / `sector_industry.csv` - BEA Sector classification (~21 categories) and its many-to-many join to `industry.csv`, used by `interstate.csv`'s Sector-level aggregation — see [PLAN.md](PLAN.md)
+  - `sector.csv` / `sector_industry.csv` - BEA Sector classification (~21 categories) and its many-to-many join to `industry.csv`, used by `interstate.csv`'s Sector-level aggregation — see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md)
   - `factor.csv` - Environmental factor definitions (721 factors)
   - `trade_factor.csv` - Environmental coefficients (aggregated flows — ~10 per industry, not a top-N slice; see below)
   - `trade_factor_lg.csv` - All environmental coefficients (721 factors for domestic flows)
