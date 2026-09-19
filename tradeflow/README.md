@@ -136,5 +136,3 @@ interstate keeps trade_id as the only path back to the originating international
 | /api/db/industry-schema | GET | `?year=` | Live schema + row counts, used by the schema diagram on this page |
 | /api/db/list-exiobase-years | GET | — | Years with a provisioned database right now |
 | /api/db/test-exiobase-year-connection | GET | `?year=` | Connection health check for one year |
-
-**Insert Data doesn't run Python.** CSVs are generated ahead of time by trade.py/bea/main.py and published to the trade-data repo; the Insert Data button just fetches and loads what's already there.

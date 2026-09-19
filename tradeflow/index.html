@@ -249,10 +249,13 @@ waitForLocalsiteJs();
       <option value="2020">2020</option>
       <option value="2019" selected>2019</option>
     </select>
+    <!-- Button looks good, but is not needed currently.
     <button class="btn-insert" id="btnInsertData">
       <span class="material-icons" style="font-size:16px">upload</span>
       Insert Data
     </button>
+    -->
+
   </div>
   <div class="insert-status" id="insertStatus"></div>
 
@@ -430,6 +433,9 @@ waitForLocalsiteJs();
   }
 
   // ---- Insert Data button ----
+  // Button looks good, but is not needed currently. Commented out along
+  // with the HTML button above; uncomment both to re-enable.
+  /*
   const btnInsert = document.getElementById('btnInsertData');
   const status   = document.getElementById('insertStatus');
 
@@ -477,6 +483,7 @@ waitForLocalsiteJs();
       showStatus('Request failed: ' + err.message + ' — Is the Rust API running on port 8081?', 'error');
     });
   });
+  */
 
   // ---- Schema diagram ----
   // Live row counts (and the three-dot menu) are added once this resolves,
