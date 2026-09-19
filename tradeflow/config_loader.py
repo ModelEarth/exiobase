@@ -10,9 +10,12 @@ from pathlib import Path
 def load_config():
     """
     Load configuration from config.yaml.
-    When run as a subprocess from main.py, EXIOBASE_TRADEFLOW and EXIOBASE_COUNTRY
-    environment variables override the config file values, so config.yaml mutations
-    from the parent process cannot cause stale values inside subprocesses.
+    When run as a subprocess from main.py, EXIOBASE_TRADEFLOW, EXIOBASE_YEAR,
+    EXIOBASE_COUNTRY, and EXIOBASE_COUNTRY_LIST environment variables override
+    the config file values, so config.yaml mutations from the parent process
+    cannot cause stale values inside subprocesses — and so a one-off script
+    run (e.g. `EXIOBASE_YEAR=2019 python3 trade.py`) doesn't require editing
+    config.yaml's YEAR and remembering to revert it afterward.
     """
     config_path = Path(__file__).parent / 'config.yaml'
 
@@ -21,10 +24,21 @@ def load_config():
 
     # Environment variable overrides (set by main.py for each subprocess invocation)
     tradeflow_env = os.environ.get('EXIOBASE_TRADEFLOW')
+    year_env = os.environ.get('EXIOBASE_YEAR')
+    country_list_env = os.environ.get('EXIOBASE_COUNTRY_LIST')
     country_env = os.environ.get('EXIOBASE_COUNTRY')
 
     if tradeflow_env:
         config['TRADEFLOW'] = tradeflow_env
+
+    if year_env:
+        config['YEAR'] = int(year_env)
+
+    if country_list_env:
+        if isinstance(config['COUNTRY'], dict):
+            config['COUNTRY']['list'] = country_list_env
+        else:
+            config['COUNTRY'] = country_list_env
 
     if country_env:
         if isinstance(config['COUNTRY'], dict):
