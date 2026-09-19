@@ -3,14 +3,20 @@
 """
 Smart batch processing with enhanced country list handling
 Supports: "all", "default", auto-populate current, cleanup when done
+
+Settings (TRADEFLOW, YEAR, COUNTRY) come from config.yaml, overridable via
+EXIOBASE_TRADEFLOW / EXIOBASE_YEAR / EXIOBASE_COUNTRY_LIST env vars so a run
+doesn't need to edit config.yaml (safe alongside other processes using it).
+Pass --saveconfig to also persist the resolved settings back to config.yaml,
+written once up front, before any country/tradeflow processing starts.
 """
 
 import subprocess
 import sys
 import time
-import yaml
 from pathlib import Path
-from config_loader import load_config
+from config_loader import load_config  # also validates PyYAML is installed
+import yaml
 
 # Set UTF-8 encoding for Windows console
 import os
@@ -36,8 +42,27 @@ def get_existing_countries(year):
     return sorted(countries)
 
 def get_default_countries():
-    """Get the default list of 12 countries"""
-    return ['CN', 'DE', 'JP', 'GB', 'FR', 'IT', 'CA', 'BR', 'AU', 'KR', 'US', 'IN']
+    """Get the default list of 14 countries"""
+    return ['AU', 'BR', 'CA', 'CN', 'DE', 'FR', 'GB', 'IN', 'IT', 'JP', 'KR', 'RU', 'US', 'WM']
+
+def update_config_file(updates):
+    """Write top-level key updates to config.yaml (opt-in via --saveconfig, called once up front)"""
+    config_path = Path(__file__).parent / 'config.yaml'
+
+    with open(config_path, 'r') as f:
+        disk_config = yaml.safe_load(f)
+
+    disk_config.update(updates)
+
+    with open(config_path, 'w') as f:
+        yaml.dump(disk_config, f, default_flow_style=False, sort_keys=False)
+
+def resolve_year_list(config):
+    """Resolve YEAR into a list of ints, supporting a comma-separated value"""
+    year_config = config['YEAR']
+    if isinstance(year_config, str) and ',' in year_config:
+        return [int(y.strip()) for y in year_config.split(',')]
+    return [int(year_config)]
 
 def resolve_country_list(config):
     """Resolve country list based on 'all', 'default', or explicit list"""
@@ -95,52 +120,6 @@ def filter_incomplete_countries(countries, tradeflow, year):
     
     return incomplete, completed
 
-def update_config_file(updates):
-    """Update config.yaml file with new values"""
-    config_path = Path(__file__).parent / 'config.yaml'
-    
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Apply updates
-    for key, value in updates.items():
-        if '.' in key:
-            # Handle nested keys like COUNTRY.current
-            parts = key.split('.')
-            current_level = config
-            for part in parts[:-1]:
-                if part not in current_level:
-                    current_level[part] = {}
-                current_level = current_level[part]
-            current_level[parts[-1]] = value
-        else:
-            config[key] = value
-    
-    with open(config_path, 'w') as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-def remove_config_key(key_path):
-    """Remove a key from config.yaml"""
-    config_path = Path(__file__).parent / 'config.yaml'
-    
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Remove nested key
-    parts = key_path.split('.')
-    current_level = config
-    for part in parts[:-1]:
-        if part in current_level:
-            current_level = current_level[part]
-        else:
-            return  # Key doesn't exist
-    
-    if parts[-1] in current_level:
-        del current_level[parts[-1]]
-        
-        with open(config_path, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
 def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=18000, country_timeout=3600):
     """Run complete processing for a single country with timing and batch timeout check"""
     # Check if batch timeout exceeded before starting country
@@ -153,10 +132,7 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     print(f"{'='*80}")
     
     start_time = time.time()
-    
-    # Set current country in config
-    update_config_file({'COUNTRY.current': country})
-    
+
     scripts = [
         'trade.py',
         'trade_impact.py',
@@ -254,42 +230,64 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     elif total_time > 600:  # More than 10 minutes  
         print(f"[SLOW] Slower processing - took over 10 minutes")
     
-    return success_count == len(scripts)
+    return success_count == len(scripts), total_time
 
 def main():
     """Smart batch processing with enhanced country handling"""
+    save_config = '--saveconfig' in sys.argv
     config = load_config()
     tradeflow_config = config['TRADEFLOW']
-    
+    years = resolve_year_list(config)
+
+    if len(years) > 1:
+        print(f"[YEARS] Processing multiple years: {', '.join(str(y) for y in years)}")
+
     # Handle comma-separated tradeflows
     if ',' in tradeflow_config:
         tradeflows = [tf.strip() for tf in tradeflow_config.split(',')]
         print(f"[LIST] Processing multiple tradeflows: {', '.join(tradeflows)}")
     else:
         tradeflows = [tradeflow_config]
-    
-    # Process each tradeflow separately
-    for tradeflow in tradeflows:
-        print(f"\n{'='*100}")
-        print(f"[START] STARTING BATCH PROCESSING FOR TRADEFLOW: {tradeflow.upper()}")
-        print(f"{'='*100}")
-        
-        # Temporarily update config file for this tradeflow
-        original_tradeflow = config['TRADEFLOW']
-        update_config_file({'TRADEFLOW': tradeflow})
-        config['TRADEFLOW'] = tradeflow
-        
-        # Resolve country list (handles 'all', 'default', explicit)
-        all_countries = resolve_country_list(config)
-        
-        # Filter out already completed countries for resume functionality
-        countries, completed_countries = filter_incomplete_countries(all_countries, tradeflow, config['YEAR'])
-        
-        process_tradeflow(config, tradeflow, all_countries, countries, completed_countries)
-        
-        # Restore original config file
-        update_config_file({'TRADEFLOW': original_tradeflow})
-        config['TRADEFLOW'] = original_tradeflow
+
+    # Optionally persist the resolved (possibly env-overridden) settings to
+    # config.yaml, once, before any processing starts.
+    if save_config:
+        country_config = config['COUNTRY']
+        country_to_save = country_config.get('list', '') if isinstance(country_config, dict) else country_config
+        print(f"[SAVE] --saveconfig: writing TRADEFLOW={tradeflow_config}, YEAR={config['YEAR']}, COUNTRY.list={country_to_save} to config.yaml")
+        update_config_file({
+            'TRADEFLOW': tradeflow_config,
+            'YEAR': config['YEAR'],
+            'COUNTRY': {'list': country_to_save},
+        })
+
+    # Process each year separately
+    for year in years:
+        if len(years) > 1:
+            print(f"\n{'#'*100}")
+            print(f"[YEAR] STARTING BATCH PROCESSING FOR YEAR: {year}")
+            print(f"{'#'*100}")
+
+        config['YEAR'] = year
+        # Subprocesses inherit os.environ, so re-export a single resolved
+        # year even if the shell originally passed a comma-separated list.
+        os.environ['EXIOBASE_YEAR'] = str(year)
+
+        # Process each tradeflow separately
+        for tradeflow in tradeflows:
+            print(f"\n{'='*100}")
+            print(f"[START] STARTING BATCH PROCESSING FOR TRADEFLOW: {tradeflow.upper()}")
+            print(f"{'='*100}")
+
+            config['TRADEFLOW'] = tradeflow
+
+            # Resolve country list (handles 'all', 'default', explicit)
+            all_countries = resolve_country_list(config)
+
+            # Filter out already completed countries for resume functionality
+            countries, completed_countries = filter_incomplete_countries(all_countries, tradeflow, config['YEAR'])
+
+            process_tradeflow(config, tradeflow, all_countries, countries, completed_countries)
 
 def process_tradeflow(config, tradeflow, all_countries, countries, completed_countries):
     """Process a single tradeflow for all countries"""
@@ -305,20 +303,19 @@ def process_tradeflow(config, tradeflow, all_countries, countries, completed_cou
     if not countries:
         print(f"\n[SUCCESS] ALL COUNTRIES ALREADY COMPLETED!")
         print(f"[OK] Completed countries: {', '.join(completed_countries)}")
-        print(f"[CLEAN] Cleaning up config - removing current country setting...")
-        remove_config_key('COUNTRY.current')
         return
     
     batch_start = time.time()
-    batch_timeout = 18000  # 5 hours in seconds
-    country_timeout = 3600  # 1 hour per country (60 minutes)
-    print(f"[TIME] Per-country time limit: {country_timeout/60:.0f} minutes")
+    batch_timeout = 18000  # 5 hours - hard safety ceiling, not a pace estimate
+    country_timeout = 3600  # 1 hour per country - hard safety ceiling, not a pace estimate
+    print(f"[TIME] Per-country safety limit: {country_timeout/60:.0f} minutes (hard stop; actual pace is estimated below once measured)")
     results = {}
-    
+    country_durations = []  # actual measured seconds per country, this run only
+
     # Initialize results for completed countries as successful
     for country in completed_countries:
         results[country] = True
-    
+
     for i, country in enumerate(countries, 1):
         # Check batch timeout before starting each country
         elapsed_batch_time = time.time() - batch_start
@@ -329,23 +326,28 @@ def process_tradeflow(config, tradeflow, all_countries, countries, completed_cou
             for remaining_country in countries[i-1:]:
                 results[remaining_country] = False
             break
-            
-        remaining_time = (batch_timeout - elapsed_batch_time) / 3600
+
+        remaining_countries = len(countries) - (i - 1)
         print(f"\n{'[RELOAD]' * 20}")
         print(f"PROCESSING COUNTRY {i}/{len(countries)}: {country}")
-        print(f"[TIME] Batch time remaining: {remaining_time:.1f} hours")
+        if country_durations:
+            # Use the 2nd country's measured time alone once available — the
+            # 1st often runs slower due to one-time startup/caching overhead.
+            estimate_per_country = country_durations[1] if len(country_durations) >= 2 else country_durations[0]
+            est_remaining_minutes = estimate_per_country * remaining_countries / 60
+            print(f"[TIME] Estimated time remaining: {est_remaining_minutes:.1f} minutes (~{estimate_per_country/60:.1f} min/country, based on measured pace)")
+        else:
+            remaining_time = (batch_timeout - elapsed_batch_time) / 3600
+            print(f"[TIME] Batch time remaining: {remaining_time:.1f} hours (safety limit; no measured pace yet)")
         print(f"{'[RELOAD]' * 20}")
-        
-        country_success = run_country_processing(country, tradeflow, batch_start, batch_timeout, country_timeout)
+
+        country_success, country_duration = run_country_processing(country, tradeflow, batch_start, batch_timeout, country_timeout)
         results[country] = country_success
-        
+        country_durations.append(country_duration)
+
         # If country processing was stopped due to batch timeout, break
         if not country_success and elapsed_batch_time >= batch_timeout:
             break
-    
-    # Clean up - remove current from config when done
-    print(f"\n[CLEAN] Cleaning up config - removing current country setting...")
-    remove_config_key('COUNTRY.current')
     
     # Final batch summary
     batch_time = time.time() - batch_start

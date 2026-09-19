@@ -3,9 +3,24 @@
 Configuration loader for Exiobase Trade Flow Analysis
 """
 
-import yaml
 import os
+import sys
 from pathlib import Path
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    env_prefix = ' '.join(f'{k}={v}' for k, v in os.environ.items() if k.startswith('EXIOBASE_'))
+    original_cmd = ' '.join(sys.argv)
+    retry_cmd = f"{env_prefix + ' ' if env_prefix else ''}.venv/bin/python3 {original_cmd}"
+    sys.exit(
+        "Missing dependency: PyYAML.\n"
+        "This folder has a .venv with it installed. Options:\n"
+        f"  1. Just this once:      {retry_cmd}\n"
+        "  2. For this session:    source .venv/bin/activate\n"
+        "  3. Permanently:         python3 -m pip install -r requirements.txt\n"
+        "     (installs into whatever 'python3' you normally run — after this, the short command works in any terminal, no venv needed)"
+    )
 
 def load_config():
     """
@@ -16,6 +31,9 @@ def load_config():
     cannot cause stale values inside subprocesses — and so a one-off script
     run (e.g. `EXIOBASE_YEAR=2019 python3 trade.py`) doesn't require editing
     config.yaml's YEAR and remembering to revert it afterward.
+    EXIOBASE_YEAR (or config.yaml's YEAR) may be a comma-separated list of
+    years (e.g. "2019,2021") — main.py's batch loop resolves that into a
+    year list and runs each one in turn.
     """
     config_path = Path(__file__).parent / 'config.yaml'
 
@@ -32,7 +50,10 @@ def load_config():
         config['TRADEFLOW'] = tradeflow_env
 
     if year_env:
-        config['YEAR'] = int(year_env)
+        # A comma-separated value (e.g. "2019,2021") is left as a string here;
+        # only main.py's batch loop resolves it into a year list and re-exports
+        # EXIOBASE_YEAR as a single year per iteration for subprocesses.
+        config['YEAR'] = int(year_env) if ',' not in year_env else year_env
 
     if country_list_env:
         if isinstance(config['COUNTRY'], dict):
