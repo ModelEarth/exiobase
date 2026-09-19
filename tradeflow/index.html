@@ -87,7 +87,7 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
   display: none;
   position: absolute;
   top: 14px;
-  right: 16px;
+  right: 52px;
   width: 28px;
   height: 28px;
   border: 4px solid #D1D5DB;
@@ -97,13 +97,36 @@ th, td { padding: 4px 20px 4px 8px; text-align: left; border-bottom: 1px solid #
 }
 .dark .schema-panel-spinner { border-color: #4B5563; border-top-color: #9CA3AF; }
 @keyframes schema-spin { to { transform: rotate(360deg); } }
+.schema-panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 14px 0;
+}
 .schema-panel h3 {
   font-size: 15px;
   font-weight: 600;
-  margin: 0 0 14px 0;
+  margin: 0;
   color: #111;
 }
 .dark .schema-panel h3 { color: #e5e7eb; }
+.schema-panel-menu-wrap { position: relative; }
+.schema-panel-menu-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  color: #6B7280;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+.schema-panel-menu-btn:hover { background: #F3F4F6; }
+.dark .schema-panel-menu-btn { color: #9CA3AF; }
+.dark .schema-panel-menu-btn:hover { background: #374151; }
+.schema-panel-menu-wrap .schema-menu { top: 26px; left: auto; right: 0; }
 #schema-diagram {
   width: 100%;
   overflow-x: auto;
@@ -235,7 +258,15 @@ waitForLocalsiteJs();
 
   <!-- Real-time schema diagram -->
   <div class="schema-panel">
-    <h3>Industry Database Schema</h3>
+    <div class="schema-panel-title-row">
+      <h3>Industry Database Schema</h3>
+      <div class="schema-panel-menu-wrap">
+        <button type="button" class="schema-panel-menu-btn" id="schemaPanelMenuBtn" title="Schema options" aria-label="Schema options">&#8943;</button>
+        <div class="schema-menu" id="schemaPanelMenu">
+          <a href="#" id="schemaMenuLayoutJson">Layout Json</a>
+        </div>
+      </div>
+    </div>
     <div class="schema-panel-spinner" id="schemaPanelSpinner" title="Loading live schema…"></div>
     <div id="schema-diagram">
       <div class="schema-loading" id="schemaLoading">Loading schema from Industry Database...</div>
@@ -502,21 +533,30 @@ waitForLocalsiteJs();
     g.appendChild(menuGroup);
   }
 
+  // Default layout positions for each table box. interstate_estimate's entry
+  // is commented out along with the rest of its schema-display presence
+  // below — see getStaticSchema(). To publish a saved arrangement for other
+  // users, paste the "Layout Json" (from the schema panel's ⋮ menu) over
+  // this object.
+  const DEFAULT_LAYOUT = {"industry":{"x":22,"y":243},"sector":{"x":22,"y":400},"sector_industry":{"x":22,"y":520},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343}/*,"interstate_estimate":{"x":531,"y":470}*/}
+
+  function getSavedLayout() {
+    const layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+    try {
+      const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
+      if (saved) Object.keys(layout).forEach(k => { if (saved[k]) layout[k] = saved[k]; });
+    } catch(e) {}
+    return layout;
+  }
+
   function renderSchemaDiagram(data, deferExtras) {
     document.getElementById('schemaLoading').style.display = 'none';
     const svg = document.getElementById('schema-svg');
     svg.style.display = '';
     svg.innerHTML = '';
 
-    // Mutable layout positions for each table box. interstate_estimate's
-    // entry is commented out along with the rest of its schema-display
-    // presence below — see getStaticSchema().
-    const layout = {"industry":{"x":22,"y":243},"sector":{"x":22,"y":400},"sector_industry":{"x":22,"y":520},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343}/*,"interstate_estimate":{"x":531,"y":470}*/}
-
-    try {
-      const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
-      if (saved) Object.keys(layout).forEach(k => { if (saved[k]) layout[k] = saved[k]; });
-    } catch(e) {}
+    // Mutable layout positions for each table box (current drag positions).
+    const layout = getSavedLayout();
 
     const BOX_W = 190, BOX_H_BASE = 28, ROW_H = 18;
     const tables = (data && data.tables) ? data.tables : {};
@@ -818,6 +858,60 @@ waitForLocalsiteJs();
     renderSchemaDiagram(null, true);
     loadSchemaDiagram();
   });
+
+  // ---- Schema panel ⋮ menu: export the current table layout as JSON ----
+  function setupSchemaPanelMenu() {
+    const menuBtn  = document.getElementById('schemaPanelMenuBtn');
+    const menu     = document.getElementById('schemaPanelMenu');
+    const copyLink = document.getElementById('schemaMenuLayoutJson');
+    if (!menuBtn || !menu || !copyLink) return;
+
+    menuBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+    });
+
+    document.addEventListener('click', e => {
+      if (menu.style.display === 'block' && !menu.contains(e.target) && e.target !== menuBtn) {
+        menu.style.display = 'none';
+      }
+    });
+
+    copyLink.addEventListener('click', e => {
+      e.preventDefault();
+      menu.style.display = 'none';
+      const json = JSON.stringify(getSavedLayout());
+      const where = 'the "const DEFAULT_LAYOUT = {...}" line in exiobase/tradeflow/index.html '
+        + '(inside the <script> near renderSchemaDiagram)';
+
+      function done(copied) {
+        alert(copied
+          ? 'Layout JSON copied to clipboard.\n\nPaste it over ' + where
+            + ' to save this table arrangement for other users.'
+          : 'Could not copy automatically — copy this JSON and paste it over '
+            + where + ':\n\n' + json);
+      }
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(json).then(() => done(true), () => done(false));
+      } else {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = json;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          done(ok);
+        } catch (err) {
+          done(false);
+        }
+      }
+    });
+  }
+  setupSchemaPanelMenu();
 
 })();
 </script>
