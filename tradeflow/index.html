@@ -319,9 +319,15 @@ waitForLocalsiteJs();
     schemaAboutPanel.classList.toggle('open');
   });
 
+  // Tracks which year's schema is currently loaded, so a hash change
+  // unrelated to tradeflowYear (e.g. country/geoview) doesn't trigger a
+  // redundant re-fetch of the same year's schema.
+  let loadedSchemaYear = null;
+
   yearSel.addEventListener('change', function () {
     safeGoHash({ tradeflowYear: this.value });
     updateSchemaSourceLink(this.value);
+    loadSchemaDiagram();
   });
 
   function syncYearFromHash() {
@@ -334,7 +340,13 @@ waitForLocalsiteJs();
   }
 
   // ---- Hash change listener ----
-  document.addEventListener('hashChangeEvent', syncYearFromHash);
+  // Each year has its own database (see PLAN-industry.md), so navigating to
+  // a link like #tradeflowYear=2021 while this page is already open needs
+  // to re-fetch the live schema for that year, not just update the dropdown.
+  document.addEventListener('hashChangeEvent', function () {
+    syncYearFromHash();
+    if (yearSel.value !== loadedSchemaYear) loadSchemaDiagram();
+  });
   syncYearFromHash();
 
   // ---- CSV data link (resolves each table straight to its GitHub file) ----
@@ -433,7 +445,9 @@ waitForLocalsiteJs();
   function loadSchemaDiagram() {
     const spinner = document.getElementById('schemaPanelSpinner');
     if (spinner) spinner.style.display = 'block';
-    fetch(RUST_API + '/db/industry-schema')
+    const year = yearSel.value;
+    loadedSchemaYear = year;
+    fetch(RUST_API + '/db/industry-schema?year=' + encodeURIComponent(year))
       .then(r => r.json())
       .then(data => renderSchemaDiagram(data))
       .catch(() => renderSchemaDiagram(null))
