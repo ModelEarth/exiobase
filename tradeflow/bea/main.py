@@ -23,13 +23,13 @@ import csv
 import requests
 from pathlib import Path
 from datetime import datetime
-from dotenv import load_dotenv
 
 # Allow imports from parent tradeflow directory (config_loader, trade, etc.)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import existing modules
 from config_loader import load_config, get_file_path, get_reference_file_path
+from bea_key import find_bea_api_key
 
 # Import US-BEA specialized modules
 from main_api_client import BEAAPIClient
@@ -85,94 +85,20 @@ class USBEATradeFlow:
         else:
             print("Optimization: Will skip existing trade.csv files")
         
-    def _try_load_local_cloud_repo_env(self):
-        """
-        Look for a repo folder near this checkout whose name starts with
-        "cloud" and that has an automation/paths.yaml file — the same file
-        that repo's own automation reads to find its env file — and, if
-        found, load whatever env file it points to. Never logs the resolved
-        path or its contents. Returns True if an env file was loaded, False
-        if no such repo/file is present (e.g. in Docker or CI), in which
-        case the caller falls back to other sources.
-        """
-        current = Path(__file__).resolve().parent
-        for _ in range(4):
-            parent = current.parent
-            if parent == current:
-                break
-            try:
-                siblings = [d for d in parent.iterdir() if d.is_dir()]
-            except OSError:
-                break
-            for sibling in siblings:
-                if sibling == current:
-                    continue
-                if not sibling.name.lower().startswith('cloud'):
-                    continue
-                paths_yaml = sibling / 'automation' / 'paths.yaml'
-                if not paths_yaml.exists():
-                    continue
-                env_file = self._resolve_env_file_from_paths_yaml(paths_yaml)
-                if env_file and env_file.exists():
-                    load_dotenv(env_file)
-                    return True
-            current = parent
-        return False
-
-    @staticmethod
-    def _resolve_env_file_from_paths_yaml(paths_yaml_path):
-        """Read the last `env_file:` line from paths.yaml and resolve it
-        relative to paths.yaml's own directory."""
-        env_line = None
-        for line in paths_yaml_path.read_text().splitlines():
-            line = line.strip()
-            if line.lower().startswith('env_file:'):
-                env_line = line
-        if env_line is None:
-            return None
-        value = env_line.split(':', 1)[1].strip().strip('"')
-        if not value:
-            return None
-        return (paths_yaml_path.parent / value).resolve()
-
     def _load_bea_api_key(self, provided_key):
-        """Load BEA API key from command line, .env files, or environment.
-        Returns None if not found — BEA API calls will fall back to empty DataFrames."""
-        if provided_key:
-            return provided_key
-
-        if self._try_load_local_cloud_repo_env():
-            env_key = os.getenv('BEA_API_KEY')
-            if env_key:
-                print("Loaded BEA API key from local environment")
-                return env_key
-
-        # Fall back to webroot/docker/.env or webroot/.env
-        # bea/main.py -> bea -> tradeflow -> exiobase -> webroot, so webroot is parents[3]
-        search_paths = [
-            Path(__file__).parents[3] / 'docker' / '.env',   # webroot/docker/.env
-            Path(__file__).parents[3] / '.env',               # webroot/.env
-        ]
-        for env_path in search_paths:
-            if env_path.exists():
-                load_dotenv(env_path)
-                env_key = os.getenv('BEA_API_KEY')
-                if env_key:
-                    print(f"Loaded BEA API key from {env_path}")
-                    return env_key
-
-        # Try system environment
-        env_key = os.getenv('BEA_API_KEY')
-        if env_key:
-            print("Loaded BEA API key from system environment")
-            return env_key
+        """Load BEA API key via the shared bea_key lookup (command line,
+        local cloud-repo env, webroot/docker/.env, webroot/.env, or system
+        environment). Exits with guidance if not found anywhere."""
+        key = find_bea_api_key(provided_key, start_dir=Path(__file__).parent.parent)
+        if key:
+            return key
 
         raise SystemExit(
             "BEA_API_KEY not found.\n"
             "Add BEA_API_KEY=your_key to webroot/docker/.env or webroot/.env\n"
             "Register at https://apps.bea.gov/api/signup/"
         )
-    
+
     def process_all_tradeflows(self):
         """Main processing pipeline for enhanced BEA trade analysis"""
         start_time = time.time()

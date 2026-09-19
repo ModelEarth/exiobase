@@ -9,6 +9,13 @@ EXIOBASE_TRADEFLOW / EXIOBASE_YEAR / EXIOBASE_COUNTRY_LIST env vars so a run
 doesn't need to edit config.yaml (safe alongside other processes using it).
 Pass --saveconfig to also persist the resolved settings back to config.yaml,
 written once up front, before any country/tradeflow processing starts.
+
+Pass --interstate US to also run bea/main.py (interstate/BEA state data)
+right after each year's trade data finishes — one combined command instead
+of two. This script never uses BEA_API_KEY itself, but since bea/main.py
+does, --interstate checks that a key is findable (see bea_key.py) before
+any trade processing starts, so a missing key fails immediately rather
+than after a long run.
 """
 
 import subprocess
@@ -232,9 +239,53 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     
     return success_count == len(scripts), total_time
 
+def resolve_interstate_arg():
+    """Parse --interstate <COUNTRY> from sys.argv. Only 'US' is supported
+    (bea/main.py's interstate/BEA processing is US-only). Returns the
+    country code, or None if --interstate wasn't passed."""
+    if '--interstate' not in sys.argv:
+        return None
+    idx = sys.argv.index('--interstate')
+    if idx + 1 >= len(sys.argv):
+        sys.exit("--interstate requires a country code, e.g. --interstate US")
+    country = sys.argv[idx + 1].upper()
+    if country != 'US':
+        sys.exit(f"--interstate {country} is not supported — interstate/BEA data is US-only currently.")
+    return country
+
+def run_interstate_step(year):
+    """Run bea/main.py (interstate/BEA state data) for one year, right after
+    that year's trade data finishes. Inherits os.environ, which already has
+    EXIOBASE_YEAR set for this year and BEA_API_KEY loaded (found by main()'s
+    pre-flight check before any processing started)."""
+    print(f"\n{'='*100}")
+    print(f"[INTERSTATE] STARTING bea/main.py FOR YEAR: {year}")
+    print(f"{'='*100}")
+    result = subprocess.run([sys.executable, 'bea/main.py'], cwd=Path(__file__).parent, env=os.environ)
+    if result.returncode == 0:
+        print(f"[INTERSTATE] bea/main.py completed successfully for {year}")
+    else:
+        print(f"[ERROR] bea/main.py failed for {year} (exit code {result.returncode})")
+
 def main():
     """Smart batch processing with enhanced country handling"""
     save_config = '--saveconfig' in sys.argv
+    interstate_country = resolve_interstate_arg()
+
+    if interstate_country:
+        from bea_key import find_bea_api_key
+        print("[INTERSTATE] --interstate requested — checking for a local BEA_API_KEY before starting...")
+        if not find_bea_api_key():
+            sys.exit(
+                "BEA_API_KEY not found, but --interstate US was requested.\n"
+                "main.py doesn't use the key itself, but bea/main.py will need it after trade\n"
+                "processing finishes — add BEA_API_KEY=your_key to webroot/docker/.env or\n"
+                "webroot/.env before starting this run, so a missing key fails now instead of\n"
+                "after a long trade-data run.\n"
+                "Register at https://apps.bea.gov/api/signup/"
+            )
+        print("[INTERSTATE] BEA_API_KEY found — bea/main.py will run for each year after its trade data completes.")
+
     config = load_config()
     tradeflow_config = config['TRADEFLOW']
     years = resolve_year_list(config)
@@ -288,6 +339,9 @@ def main():
             countries, completed_countries = filter_incomplete_countries(all_countries, tradeflow, config['YEAR'])
 
             process_tradeflow(config, tradeflow, all_countries, countries, completed_countries)
+
+        if interstate_country:
+            run_interstate_step(year)
 
 def process_tradeflow(config, tradeflow, all_countries, countries, completed_countries):
     """Process a single tradeflow for all countries"""
@@ -377,7 +431,8 @@ def process_tradeflow(config, tradeflow, all_countries, countries, completed_cou
     year = config['YEAR']
     for country in all_countries:
         try:
-            result = subprocess.run(['find', f'year/{year}/{country}/{tradeflow}', '-name', '*.csv', '-type', 'f'], 
+            folder_path = config['FOLDERS'][tradeflow].format(year=year, country=country)
+            result = subprocess.run(['find', folder_path, '-name', '*.csv', '-type', 'f'],
                                   capture_output=True, text=True)
             file_count = len(result.stdout.strip().split('\n')) if result.stdout.strip() else 0
             status = "[OK]" if results[country] else "[WARN] "

@@ -57,6 +57,19 @@ python3 bea/main.py
 # Process multiple countries automatically
 python main.py
 
+# Override YEAR/TRADEFLOW/COUNTRY.list without editing config.yaml — safe
+# to run alongside another process using the same config.yaml. YEAR accepts
+# a comma-separated list (e.g. "2019,2021"), looping each year in turn.
+EXIOBASE_YEAR=2019,2021 EXIOBASE_COUNTRY_LIST=default python main.py
+
+# Also persist the resolved settings back to config.yaml, once, before
+# any processing starts
+python main.py --saveconfig
+
+# Also run bea/main.py (interstate/BEA data) right after each year's trade
+# data finishes — checks BEA_API_KEY exists before starting anything
+python main.py --interstate US
+
 # Update current country manually
 python update_current_country.py CN
 ```
@@ -313,6 +326,12 @@ If the `trade.csv` files don't exist yet, pass `--force-regen` to generate them 
 
 **Working directory**: Always run from `exiobase/tradeflow/` (not from `bea/`).
 CWD doesn't affect file resolution (all paths use `Path(__file__)`), but it is the established convention.
+
+**Combined with trade processing**: `main.py --interstate US` runs this automatically, once per
+year, right after that year's trade data finishes — no separate command needed. The key lookup
+(`_load_bea_api_key`) delegates to the shared `bea_key.find_bea_api_key()`, which `main.py` also
+calls upfront when `--interstate` is passed, so a missing key is caught before any trade
+processing starts rather than after.
 
 ### Key outputs
 - `year/{year}/US/domestic/interstate.csv`

@@ -52,7 +52,13 @@ Then run:
 python main.py
 ```
 
-Get US Interstate Data (uses the same config.yaml file) - [BEA Details](bea)
+**To also get US Interstate Data** ([BEA Details](bea)) right after each year's trade data finishes, add `--interstate US`:
+
+```bash
+python main.py --interstate US
+```
+
+This checks that a **BEA_API_KEY** is findable (see [AGENTS.md](AGENTS.md)) before starting — `main.py` never uses the key itself, but `bea/main.py` does, so a missing key fails immediately instead of after a long trade-data run. With multiple years in `YEAR` (e.g. `2019,2021`), the interstate step runs once per year, right after that year's trade data completes. `bea/main.py` can still be run on its own afterward if you skip `--interstate`:
 
 ```bash
 python bea/main.py --bea-key YOUR_API_KEY

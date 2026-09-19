@@ -164,6 +164,9 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 ~/env/bin/python3 bea/main.py --help
 ```
 
+Or run it automatically after each year's trade data, via `python main.py --interstate US` from
+[../](..) — see [../README.md](../README.md).
+
 <br>
 
 # Tables Name and Column Design
