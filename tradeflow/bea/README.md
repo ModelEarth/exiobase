@@ -165,7 +165,8 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 ```
 
 Or run it automatically after each year's trade data, via `python main.py --interstate US` from
-[../](..) — see [../README.md](../README.md).
+[../](..) — see [../README.md](../README.md). Add `,IN` (`--interstate US,IN`) to also run
+[../india/main.py](../india) in the same combined run.
 
 <br>
 

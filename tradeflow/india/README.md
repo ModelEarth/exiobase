@@ -2,6 +2,8 @@
 
 Allocates national India trade flow and economic data down to the state/UT level, producing matrices that integrate with the Exiobase MRIO pipeline.
 
+**See [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/india/PLAN.md)** for open gaps: output columns don't yet match US `bea/main.py` naming, raw `India_data/` source URLs aren't documented, and where the raw files should live long-term (a possible new `trade-india` repo, mirroring `trade-data`).
+
 ## main.py
 
 ### What it processes
@@ -63,6 +65,12 @@ python india/main.py --year 2019
 # Specify a custom output directory
 python india/main.py --output-dir ../../trade-data/year/2019/IN/domestic
 ```
+
+Or run it automatically after each year's trade data, via `python main.py --interstate IN` from
+[../](..) — see [../README.md](../README.md). Add `US,` (`--interstate US,IN`) to also run
+[../bea/main.py](../bea) in the same combined run. Before starting, this checks that
+`exiobase/India_data/` exists, so a missing directory fails immediately instead of after a long
+trade-data run.
 
 ### Dependencies
 

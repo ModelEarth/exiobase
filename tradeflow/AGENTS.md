@@ -70,6 +70,11 @@ python main.py --saveconfig
 # data finishes — checks BEA_API_KEY exists before starting anything
 python main.py --interstate US
 
+# Comma-separated list runs more than one — also runs india/main.py after
+# each year's trade data; a space after the comma is optional. Checks each
+# country's prerequisite (BEA_API_KEY for US, India_data/ dir for IN) first.
+python main.py --interstate US,IN
+
 # Update current country manually
 python update_current_country.py CN
 ```
@@ -328,10 +333,11 @@ If the `trade.csv` files don't exist yet, pass `--force-regen` to generate them 
 CWD doesn't affect file resolution (all paths use `Path(__file__)`), but it is the established convention.
 
 **Combined with trade processing**: `main.py --interstate US` runs this automatically, once per
-year, right after that year's trade data finishes — no separate command needed. The key lookup
-(`_load_bea_api_key`) delegates to the shared `bea_key.find_bea_api_key()`, which `main.py` also
-calls upfront when `--interstate` is passed, so a missing key is caught before any trade
-processing starts rather than after.
+year, right after that year's trade data finishes — no separate command needed (`--interstate` also
+accepts a comma-separated list, e.g. `--interstate US,IN`, to combine with [india/main.py](india)
+in the same run). The key lookup (`_load_bea_api_key`) delegates to the shared
+`bea_key.find_bea_api_key()`, which `main.py` also calls upfront when `US` is in `--interstate`,
+so a missing key is caught before any trade processing starts rather than after.
 
 ### Key outputs
 - `year/{year}/US/domestic/interstate.csv`
@@ -350,6 +356,35 @@ instead uses every raw per-stressor factor_id (1-721, assigned by row position a
 in order: `air_emissions`, `employment`, `energy`, `land`, `material`, `water`, same ordering as
 `factor.csv`), filtered by `min_impact_threshold` only, no top-N cap. If the zip is unavailable,
 the file falls back to one aggregate row per state-pair with no `factor_id`.
+
+## India State-Level Pipeline (`india/main.py`)
+
+### Purpose
+Disaggregates national Indian economic/trade data down to states and union territories (GSDP ×
+GSVA sector shares, TradeStat exports/imports, SUT-derived A-matrices), matching Indian activity
+labels to Exiobase `industry_id` via `india_us_exiobase_crosswalk.csv` — the same taxonomy used in
+US `trade-data` outputs. Full detail in [india/README.md](india).
+
+### Prerequisites (must exist before running)
+- `exiobase/India_data/` (two levels up from `tradeflow/`) — GSDP, GSVA, SUT, and TradeStat export/import source files; the script scans and categorizes them by filename automatically
+
+### Run command (from `exiobase/tradeflow/`)
+```bash
+python india/main.py
+python india/main.py --year 2019
+```
+
+**Combined with trade processing**: `main.py --interstate IN` (or `--interstate US,IN` to combine
+with the BEA pipeline) runs this automatically, once per year, right after that year's trade data
+finishes. `main.py` checks that `exiobase/India_data/` exists upfront when `IN` is in
+`--interstate`, so a missing directory is caught before any trade processing starts.
+
+### Key outputs
+- `year/{year}/IN/domestic/state_sector_output.csv`
+- `year/{year}/IN/domestic/state_product_export.csv`
+- `year/{year}/IN/domestic/state_product_import.csv`
+- `year/{year}/IN/domestic/india_states.csv`
+- `year/{year}/IN/domestic/allocation_report.md`
 
 ---
 

@@ -52,16 +52,19 @@ Then run:
 python main.py
 ```
 
-**To also get US Interstate Data** ([BEA Details](bea)) right after each year's trade data finishes, add `--interstate US`:
+**To also get US Interstate Data** ([BEA Details](bea)) and/or **India state-level allocation** ([India Details](india)) right after each year's trade data finishes, add `--interstate US`, `--interstate IN`, or both as a comma-separated list (a space after the comma is optional):
 
 ```bash
 python main.py --interstate US
+python main.py --interstate US,IN
+python main.py --interstate US, IN
 ```
 
-This checks that a **BEA_API_KEY** is findable (see [AGENTS.md](AGENTS.md)) before starting — `main.py` never uses the key itself, but `bea/main.py` does, so a missing key fails immediately instead of after a long trade-data run. With multiple years in `YEAR` (e.g. `2019,2021`), the interstate step runs once per year, right after that year's trade data completes. `bea/main.py` can still be run on its own afterward if you skip `--interstate`:
+Before starting, this checks each requested country's prerequisite — a findable **BEA_API_KEY** for `US` (see [AGENTS.md](AGENTS.md)), and an `exiobase/India_data/` directory for `IN` — so a missing key/directory fails immediately instead of after a long trade-data run. `main.py` never uses either prerequisite itself; `bea/main.py` and `india/main.py` do. With multiple years in `YEAR` (e.g. `2019,2021`), each requested interstate step runs once per year, right after that year's trade data completes. `bea/main.py`/`india/main.py` can still be run on their own afterward if you skip `--interstate`:
 
 ```bash
 python bea/main.py --bea-key YOUR_API_KEY
+python india/main.py
 ```
 
 Lastly, [Send CSV into SQL database](https://github.com/ModelEarth/projects/issues/30):
