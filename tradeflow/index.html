@@ -501,8 +501,10 @@ waitForLocalsiteJs();
     svg.style.display = '';
     svg.innerHTML = '';
 
-    // Mutable layout positions for each table box
-    const layout = {"industry":{"x":22,"y":243},"sector":{"x":22,"y":400},"sector_industry":{"x":22,"y":520},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343},"interstate_estimate":{"x":531,"y":470}}
+    // Mutable layout positions for each table box. interstate_estimate's
+    // entry is commented out along with the rest of its schema-display
+    // presence below — see getStaticSchema().
+    const layout = {"industry":{"x":22,"y":243},"sector":{"x":22,"y":400},"sector_industry":{"x":22,"y":520},"factor":{"x":791,"y":240},"trade":{"x":260,"y":5},"trade_factor":{"x":541,"y":7},"interstate":{"x":270,"y":337},"interstate_factor":{"x":531,"y":343}/*,"interstate_estimate":{"x":531,"y":470}*/}
 
     try {
       const saved = JSON.parse(localStorage.getItem('industry-schema-positions') || 'null');
@@ -523,7 +525,7 @@ waitForLocalsiteJs();
       ['interstate',      'trade',             'trade_id (US domestic)'],
       ['interstate_factor','interstate',       'interstate_id'],
       ['interstate_factor','factor',           'factor_id'],
-      ['interstate_estimate','interstate',     'interstate_id (1-to-0-or-1)'],
+      // ['interstate_estimate','interstate',     'interstate_id (1-to-0-or-1)'],
       ['sector_industry',  'sector',            'sector_id'],
       ['sector_industry',  'industry',          'industry_id (many-to-many)'],
     ];
@@ -794,7 +796,11 @@ waitForLocalsiteJs();
       trade_factor: [{name:'trade_id',type:'integer'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
       interstate: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'state1',type:'varchar(10)'},{name:'state2',type:'varchar(10)'},{name:'sector1',type:'varchar(10)'},{name:'sector2',type:'varchar(10)'},{name:'state_industry_code',type:'varchar(30)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
       interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'factor_id',type:'integer'},{name:'level',type:'numeric'},{name:'flow_type',type:'varchar(20)'}],
-      interstate_estimate: [{name:'interstate_id',type:'varchar(80)'},{name:'employment_impact',type:'numeric'},{name:'flow_type',type:'varchar(20)'}]
+      // interstate_estimate is commented out — real satellite factor data has
+      // been available for every run so far, so interstate_factor is always
+      // populated and interstate_estimate never has rows. Uncomment if a
+      // future run genuinely lacks satellite data. See PLAN-industry.md.
+      // interstate_estimate: [{name:'interstate_id',type:'varchar(80)'},{name:'employment_impact',type:'numeric'},{name:'flow_type',type:'varchar(20)'}]
     };
   }
 
