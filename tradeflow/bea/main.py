@@ -699,10 +699,14 @@ class USBEATradeFlow:
             exploded.groupby(['state1', 'state2', 'sector1', 'sector2', 'state_industry_code'], as_index=False)
             .agg(amount=('fractional_amount', 'sum'), trade_id=('trade_id', 'first'))
         )
-        grouped['interstate_id'] = (
-            grouped['trade_id'].astype(str) + '-US-' + grouped['state1'] + '-US-' + grouped['state2']
-            + '-' + grouped['sector1'] + '-' + grouped['sector2']
-        )
+        # Plain 1-based integer, not a composite string — matches trade.py's
+        # own trade_id convention (see PLAN-merge.md's two-stage ID design).
+        # Only this primary/BEA-Sector-level id changes; the full-detail
+        # (-lg) id above (exploded['interstate_id'], from
+        # main_trade_analyzer.py) stays a string — it's gitignored/local-only
+        # and never reaches interstate.csv or the database.
+        grouped = grouped.reset_index(drop=True)
+        grouped['interstate_id'] = grouped.index + 1
         grouped['commodity_code'] = ''
         grouped['industry_code'] = ''
         grouped['economic_multiplier'] = 1.0

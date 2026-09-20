@@ -308,6 +308,7 @@ def run_interstate_step(year, interstate_countries):
 
 def main():
     """Smart batch processing with enhanced country handling"""
+    run_start_time = time.time()
     save_config = '--saveconfig' in sys.argv
     interstate_countries = resolve_interstate_countries()
 
@@ -397,6 +398,18 @@ def main():
 
         if interstate_countries:
             run_interstate_step(year, interstate_countries)
+
+    total_run_time = time.time() - run_start_time
+    hours = int(total_run_time // 3600)
+    minutes = int((total_run_time % 3600) // 60)
+    seconds = int(total_run_time % 60)
+    output_for = f"{len(years)} year(s), {len(tradeflows)} tradeflow(s)"
+    if interstate_countries:
+        output_for += f", {' '.join(interstate_countries)} interstate"
+    print(f"\n{'='*100}")
+    print(f"[DONE] TOTAL RUN TIME: {hours}h {minutes}m {seconds}s")
+    print(f"OUTPUT FOR: {output_for}")
+    print(f"{'='*100}")
 
 def process_tradeflow(config, tradeflow, all_countries, countries, completed_countries):
     """Process a single tradeflow for all countries"""
