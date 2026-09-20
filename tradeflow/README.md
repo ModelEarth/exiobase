@@ -43,7 +43,8 @@ file automatically if it's missing, but for a visible first-time download (rough
 first — see [AGENTS.md](AGENTS.md) for details:
 
 ```bash
-python exiobase_download.py
+python3 exiobase_download.py # uses YEARs from config.yaml
+python3 exiobase_download.py --year 2023
 ```
 
 Then run:

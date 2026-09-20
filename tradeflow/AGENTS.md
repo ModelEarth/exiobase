@@ -88,8 +88,8 @@ The scripts are run in this specific order to ensure proper data dependencies:
 Run this first, on its own, before `main.py` or `trade.py`:
 
 ```bash
-python3 exiobase_download.py            # uses YEAR from config.yaml
-python3 exiobase_download.py --year 2021
+python3 exiobase_download.py # uses YEARs from config.yaml
+python3 exiobase_download.py --year 2023
 ```
 
 `trade.py` calls the same `ensure_exiobase_file()` automatically and silently
