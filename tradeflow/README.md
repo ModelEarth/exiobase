@@ -128,6 +128,8 @@ interstate keeps trade_id as the only path back to the originating international
 
 **One database per year** — a Postgres database holds exactly one year (`{EXIOBASE_NAME}_{year}`), so trade, trade_factor, and interstate carry no year column; year is implicit in which database you're connected to. (interstate_id's own `{year}` prefix on the full-detail form is unrelated — just one more component of a string key, not a stored column.)
 
+**Merging into one shared, multi-year `industrydb` is planned but not live yet** — see [team/PLAN-merge.md](https://github.com/ModelEarth/team/blob/main/PLAN-merge.md) for the design (a `year` column added only in the shared database, `dblink`-based, currently blocked on an Azure extension allow-list) and the [pipeline repo](https://github.com/ModelEarth/pipeline) for the Azure activation steps and its own `View Schema` link into this page.
+
 **Import factors use Exiobase's M matrix** (total: direct + everything embodied in a sector's own upstream inputs, via the Leontief inverse), not the direct-only S matrix — matching EPA USEEIO's **import_emission_factors** methodology. Amounts stay in Euros (see Open work in [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md) for the USD conversion).
 
 **Same-state rows are kept**, not filtered — `state1 == state2` rows are genuine intrastate flow (`flow_type = 'intra_state'`), included in the same normalization as cross-state rows so totals still sum to trade.amount.
