@@ -2,32 +2,14 @@ NOTES:
   1: COUNTRY.list "default" = run only incomplete ones within AU, BR, CA,
     CN, DE, FR, GB, IN, IT, JP, KR, RU, WM, US
   2: COUNTRY.list "all" = run all (could take hours)
-  3: COUNTRY.list "comprehensive" = push every Exiobase region (all 49 —
-    see PLAN-comprehensive.md) directly to Azure for one year. No
-    per-country trade_id blocks. Set TRADEFLOW to anything; comprehensive
-    ignores it (imports/exports/domestic all come out of one extraction —
-    see PLAN-comprehensive.md). Writes a local year/[year]/[country]/
-    folder for every one of the 49 regions by default — set
-    COMPREHENSIVE.folders to "default" to only write folders for the 14
+  3: COUNTRY.list "comprehensive" = push 49 country/regions. No per-country trade_id blocks.
+    Writes a local year/[year]/[country]/ folder for every one of the 49 regions by default — 
+  4: Set COMPREHENSIVE.folders to "default" to only write folders for the 14
     default-list countries instead (every region is still pushed to Azure
     either way; this only controls local .csv output).
-  4: COMPREHENSIVE.target picks the Azure database — "year_db" (default) —
-    a dedicated industrydb_[year] database, created if missing, with no
-    year column needed since trade_id is globally sequential within that
-    database. Set to "industrydb" to instead push to the shared,
-    multi-year database, with year as a real column on trade/trade_factor
-    and trade_id unique only per year (see PLAN-comprehensive.md's
-    "Database write path"). EXIOBASE_COMPREHENSIVE_TARGET overrides this
-    setting the same way EXIOBASE_COMPREHENSIVE_FOLDERS overrides
-    COMPREHENSIVE.folders. DB_TARGET is a short alias for
-    EXIOBASE_COMPREHENSIVE_TARGET (same for YEAR/EXIOBASE_YEAR and
-    COUNTRY_LIST/EXIOBASE_COUNTRY_LIST) -- e.g. YEAR=2018
-    COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py.
-    DB_TARGET is optional; with multiple comma-separated YEARs it can be
-    one value for all of them or a comma-separated list (one per year,
-    same order) -- an explicit industrydb_[year] entry whose year doesn't
-    match its position's YEAR value stops the run before anything starts,
-    instead of silently pushing that year's data into the wrong database.
+  5: COMPREHENSIVE.target picks the Azure database — "year_db" (default) 
+    Set to "industrydb" to instead push to the shared multi-year database, with year as a real column on trade/trade_factor
+    If multiple comma-separated YEAR datasets are listed, the year must match the YEAR list.
 TRADEFLOW: domestic,imports,exports
 YEAR: 2021
 COUNTRY:
