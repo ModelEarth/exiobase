@@ -19,7 +19,10 @@ NOTES:
     and trade_id unique only per year (see PLAN-comprehensive.md's
     "Database write path"). EXIOBASE_COMPREHENSIVE_TARGET overrides this
     setting the same way EXIOBASE_COMPREHENSIVE_FOLDERS overrides
-    COMPREHENSIVE.folders.
+    COMPREHENSIVE.folders. DB_TARGET is a short alias for
+    EXIOBASE_COMPREHENSIVE_TARGET (same for YEAR/EXIOBASE_YEAR and
+    COUNTRY_LIST/EXIOBASE_COUNTRY_LIST) -- e.g. YEAR=2018
+    COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py.
 TRADEFLOW: domestic,imports,exports
 YEAR: 2021
 COUNTRY:

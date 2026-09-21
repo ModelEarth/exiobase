@@ -154,6 +154,10 @@ COMPREHENSIVE:
 `COMPREHENSIVE.target` the same way `EXIOBASE_TRADEFLOW`/`EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`
 already override their config.yaml counterparts in `config_loader.load_config()` — same pattern,
 one more `if os.environ.get(...)` block each, no change to the override mechanism itself.
+`EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`/`EXIOBASE_COMPREHENSIVE_TARGET` each also accept a short
+bare-name alias — `YEAR`/`COUNTRY_LIST`/`DB_TARGET` — for a shorter comprehensive-mode command line
+(`YEAR=2018 COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py`); the `EXIOBASE_`-prefixed
+name wins if both are set, so the short form is a convenience, not a second source of truth.
 
 `main.py` needs one new early branch, not a change to `resolve_country_list()` itself (that
 function's job — turning a country list into... a country list — doesn't fit "there is no country

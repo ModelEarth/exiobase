@@ -34,6 +34,15 @@ def load_config():
     EXIOBASE_YEAR (or config.yaml's YEAR) may be a comma-separated list of
     years (e.g. "2019,2021") — main.py's batch loop resolves that into a
     year list and runs each one in turn.
+
+    YEAR/COUNTRY_LIST/DB_TARGET are short aliases for EXIOBASE_YEAR/
+    EXIOBASE_COUNTRY_LIST/EXIOBASE_COMPREHENSIVE_TARGET, for a shorter
+    comprehensive-mode command line (e.g. `YEAR=2018 COUNTRY_LIST=comprehensive
+    DB_TARGET=industrydb python3 main.py`). The EXIOBASE_-prefixed name always
+    wins if both are set for the same value -- these bare names are a
+    convenience on top of the real mechanism, not a replacement for it (a
+    bare `YEAR` is exactly the kind of name something else in a shell session
+    could already be using for an unrelated purpose).
     """
     config_path = Path(__file__).parent / 'config.yaml'
 
@@ -42,11 +51,11 @@ def load_config():
 
     # Environment variable overrides (set by main.py for each subprocess invocation)
     tradeflow_env = os.environ.get('EXIOBASE_TRADEFLOW')
-    year_env = os.environ.get('EXIOBASE_YEAR')
-    country_list_env = os.environ.get('EXIOBASE_COUNTRY_LIST')
+    year_env = os.environ.get('EXIOBASE_YEAR') or os.environ.get('YEAR')
+    country_list_env = os.environ.get('EXIOBASE_COUNTRY_LIST') or os.environ.get('COUNTRY_LIST')
     country_env = os.environ.get('EXIOBASE_COUNTRY')
     comprehensive_folders_env = os.environ.get('EXIOBASE_COMPREHENSIVE_FOLDERS')
-    comprehensive_target_env = os.environ.get('EXIOBASE_COMPREHENSIVE_TARGET')
+    comprehensive_target_env = os.environ.get('EXIOBASE_COMPREHENSIVE_TARGET') or os.environ.get('DB_TARGET')
 
     if tradeflow_env:
         config['TRADEFLOW'] = tradeflow_env
