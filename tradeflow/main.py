@@ -165,9 +165,7 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
             break
             
         script_start = time.time()
-        remaining_country_time = (country_timeout - elapsed_country_time) / 60
         print(f"\n[PLAY]  [{i}/{len(scripts)}] Running {script} for {country}...")
-        print(f"   [TIMER]  Country time remaining: {remaining_country_time:.1f} minutes")
         
         try:
             result = subprocess.run([
