@@ -291,6 +291,7 @@ waitForLocalsiteJs();
     <section>
       <h4>Schema <a href="https://github.com/ModelEarth/team/blob/main/src/main.rs#L2108" target="_blank" rel="noopener noreferrer">View SQL Schema</a> <a href="/io/about/matrix/" target="_parent">Learn about IO Matrix</a></h4>
       <p>Eight tables: <code>industry</code> and <code>factor</code> are shared reference tables (industry definitions, 721 environmental factors); <code>sector</code> and <code>sector_industry</code> map industries into the 21 BEA sector categories used by the interstate tables; <code>trade</code> and <code>trade_factor</code> hold international flows and their environmental coefficients per country/flow_type; <code>interstate</code> and <code>interstate_factor</code> hold US state-to-state (BEA) flows. A ninth table, <code>interstate_estimate</code>, is defined in the schema but currently unused — see the Indexes section below. Each database covers a single year, so these tables carry no year column. Each table's box shows column names and types.</p>
+      <p>A tenth table, <code>region</code>, supports loading more than one country into the same database: each country gets a small <code>block_index</code>, assigned the first time it's loaded, so <code>trade_id</code> stays unique across countries (not just within one country's own files) — see the <code>team</code> repo's <a href="https://github.com/ModelEarth/team/blob/main/PLAN-merge.md" target="_parent">PLAN-merge.md</a> for the full design. It's created automatically (<code>CREATE TABLE IF NOT EXISTS</code>) the next time trade data is loaded into a database, so it may not exist yet in a database that hasn't had a load run since this table was added — it's not backfilled by any separate migration step.</p>
       <p>The diagram's columns come from two sources: a hardcoded static schema (in this page's JS and mirrored in the Rust API) used as an instant preview, and the live database schema (queried from Postgres <code>information_schema.columns</code>) once the API responds. The two can drift out of sync — that's why a column can briefly appear then disappear (as happened with a leftover <code>id</code> column already removed from the live tables but not yet from the static fallbacks).</p>
     </section>
     <section>
@@ -414,6 +415,11 @@ waitForLocalsiteJs();
         // has lacked satellite data, but kept correct here in case it's
         // re-enabled.
         return `year/${year}/US/domestic/interstate_estimate.csv`;
+      case 'region':
+        // Not sourced from a published CSV at all — it's populated by the
+        // loader itself (see getStaticSchema()'s region comment), so there's
+        // no per-table file to link to; falls through to the year folder.
+        return `year/${year}`;
       default:
         return `year/${year}`;
     }
@@ -547,7 +553,7 @@ waitForLocalsiteJs();
   // below — see getStaticSchema(). To publish a saved arrangement for other
   // users, paste "My Layout JSON" (from the schema panel's ⋮ menu) over
   // this object.
-  const DEFAULT_LAYOUT = {"industry":{"x":31,"y":53},"sector":{"x":32,"y":332},"sector_industry":{"x":33,"y":190},"factor":{"x":777,"y":215},"trade":{"x":299,"y":5},"trade_factor":{"x":557,"y":20},"interstate":{"x":299,"y":338},"interstate_factor":{"x":557,"y":399}}
+  const DEFAULT_LAYOUT = {"industry":{"x":31,"y":53},"sector":{"x":32,"y":332},"sector_industry":{"x":33,"y":190},"factor":{"x":777,"y":215},"trade":{"x":299,"y":5},"trade_factor":{"x":557,"y":20},"interstate":{"x":299,"y":338},"interstate_factor":{"x":557,"y":399},"region":{"x":777,"y":400}}
 
   function getSavedLayout() {
     const layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
@@ -861,6 +867,13 @@ waitForLocalsiteJs();
       // populated and interstate_estimate never has rows. Uncomment if a
       // future run genuinely lacks satellite data. See PLAN.md.
       // interstate_estimate: [{name:'interstate_id',type:'varchar(80)'},{name:'employment_impact',type:'numeric'},{name:'flow_type',type:'varchar(20)'}]
+      // region tracks the small per-country trade_id block assignment used
+      // to keep trade_id unique across countries within one database — see
+      // the team repo's PLAN-merge.md "Fix design: per-country trade_id
+      // blocks" section. No FK to trade (it's read once per country, before
+      // any trade.csv row is parsed, not joined at query time), so no
+      // relationship line is drawn to it below.
+      region: [{name:'country',type:'varchar(10)'},{name:'block_index',type:'integer'}]
     };
   }
 
