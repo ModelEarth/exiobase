@@ -291,7 +291,7 @@ waitForLocalsiteJs();
     <section>
       <h4>Schema <a href="https://github.com/ModelEarth/team/blob/main/src/main.rs#L2108" target="_blank" rel="noopener noreferrer">View SQL Schema</a> <a href="/io/about/matrix/" target="_parent">Learn about IO Matrix</a></h4>
       <p>Eight tables: <code>industry</code> and <code>factor</code> are shared reference tables (industry definitions, 721 environmental factors); <code>sector</code> and <code>sector_industry</code> map industries into the 21 BEA sector categories used by the interstate tables; <code>trade</code> and <code>trade_factor</code> hold international flows and their environmental coefficients per country/flow_type; <code>interstate</code> and <code>interstate_factor</code> hold US state-to-state (BEA) flows. A ninth table, <code>interstate_estimate</code>, is defined in the schema but currently unused — see the Indexes section below. Each database covers a single year, so these tables carry no year column. Each table's box shows column names and types.</p>
-      <p>A tenth table, <code>region</code>, supports loading more than one country into the same database: each country gets a small <code>block_index</code>, assigned the first time it's loaded, so <code>trade_id</code> stays unique across countries (not just within one country's own files) — see the <code>team</code> repo's <a href="https://github.com/ModelEarth/team/blob/main/PLAN-merge.md" target="_parent">PLAN-merge.md</a> for the full design. It's created automatically (<code>CREATE TABLE IF NOT EXISTS</code>) the next time trade data is loaded into a database, so it may not exist yet in a database that hasn't had a load run since this table was added — it's not backfilled by any separate migration step.</p>
+      <p>A tenth table, <code>region</code>, supports loading more than one country into the same database: each country gets a small <code>block_index</code>, assigned the first time it's loaded, so <code>trade_id</code> stays unique across countries (not just within one country's own files) — see the <code>team</code> repo's <a href="https://github.com/ModelEarth/team/blob/main/PLAN-merge.md" target="_parent">PLAN-merge.md</a> for the full design. <code>trade.country</code> has a real foreign key to <code>region.country</code> — every region row is created before any trade row referencing that country is inserted. It's created automatically (<code>CREATE TABLE IF NOT EXISTS</code>) the next time trade data is loaded into a database, so it may not exist yet in a database that hasn't had a load run since this table was added — it's not backfilled by any separate migration step.</p>
       <p>The diagram's columns come from two sources: a hardcoded static schema (in this page's JS and mirrored in the Rust API) used as an instant preview, and the live database schema (queried from Postgres <code>information_schema.columns</code>) once the API responds. The two can drift out of sync — that's why a column can briefly appear then disappear (as happened with a leftover <code>id</code> column already removed from the live tables but not yet from the static fallbacks).</p>
     </section>
     <section>
@@ -581,6 +581,7 @@ waitForLocalsiteJs();
     // Relationships: [from, to, label]
     const rels = [
       ['trade',           'industry',          'industry1/2'],
+      ['trade',           'region',            'country'],
       ['trade_factor',    'trade',             'trade_id+country+flow_type'],
       ['trade_factor',    'factor',            'factor_id'],
       ['interstate',      'sector',            'sector1/2'],
@@ -870,9 +871,9 @@ waitForLocalsiteJs();
       // region tracks the small per-country trade_id block assignment used
       // to keep trade_id unique across countries within one database — see
       // the team repo's PLAN-merge.md "Fix design: per-country trade_id
-      // blocks" section. No FK to trade (it's read once per country, before
-      // any trade.csv row is parsed, not joined at query time), so no
-      // relationship line is drawn to it below.
+      // blocks" section. trade.country -> region.country is a real FK
+      // (added below in the relationship list) — every region row is
+      // created before any trade row referencing that country is inserted.
       region: [{name:'country',type:'varchar(10)'},{name:'block_index',type:'integer'}]
     };
   }
