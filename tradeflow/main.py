@@ -137,8 +137,9 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     if elapsed_batch_time >= batch_timeout:
         print(f"[TIME] BATCH TIMEOUT: {elapsed_batch_time/3600:.1f} hours elapsed, stopping before {country}")
         return False
+    year = os.environ.get('EXIOBASE_YEAR', '?')
     print(f"\n{'='*80}")
-    print(f"[HOME] STARTING {tradeflow.upper()} PROCESSING FOR {country}")
+    print(f"[HOME] STARTING {year} {country} {tradeflow.upper()} PROCESSING")
     print(f"{'='*80}")
     
     start_time = time.time()
@@ -211,7 +212,7 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     
     # Enhanced completion feedback
     print(f"\n{'='*80}")
-    print(f"[TARGET] {country} {tradeflow.upper()} PROCESSING COMPLETE")
+    print(f"[TARGET] COMPLETED {year} {country} {tradeflow.upper()} PROCESSING")
     print(f"{'='*80}")
     print(f"[TIMER]  Total country time: {minutes}m {seconds}s (limit: {country_timeout/60:.0f} minutes)")
     print(f"[OK] Scripts completed: {success_count}/{len(scripts)}")
