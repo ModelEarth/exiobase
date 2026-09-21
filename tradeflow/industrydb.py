@@ -200,7 +200,7 @@ def push_trade_rows(conn, trade_df, year=None, target=TARGET_YEAR_DB):
         staging_ddl_columns="""
             trade_id INTEGER, region1 VARCHAR(10), region2 VARCHAR(10),
             industry1 VARCHAR(10), industry2 VARCHAR(10),
-            amount NUMERIC(18,4), flow_type VARCHAR(10)
+            amount NUMERIC(18,4), flow_type VARCHAR(20)
         """,
         columns=['trade_id', 'region1', 'region2', 'industry1', 'industry2', 'amount', 'flow_type'],
         df=trade_df,
@@ -251,10 +251,126 @@ def push_trade_factor_rows(conn, trade_factor_df, country, trade_id_flow_type, y
         staging_table='_trade_factor_staging',
         staging_ddl_columns="""
             trade_id INTEGER, factor_id INTEGER, level NUMERIC(20,6),
-            country VARCHAR(10), flow_type VARCHAR(10)
+            country VARCHAR(10), flow_type VARCHAR(20)
         """,
         columns=['trade_id', 'factor_id', 'level', 'country', 'flow_type'],
         df=df,
+        insert_sql=insert_sql,
+        insert_params=insert_params,
+    )
+
+
+def push_interstate_rows(conn, interstate_df, country='US', year=None, target=TARGET_YEAR_DB):
+    """
+    COPY interstate_df (columns: interstate_id, trade_id, state1, state2,
+    sector1, sector2, state_industry_code, amount, commodity_code,
+    industry_code, economic_multiplier -- bea/main.py's interstate.csv)
+    into a temp staging table, then INSERT ... SELECT ... ON CONFLICT DO
+    NOTHING into `interstate`. `country` defaults to 'US' -- interstate.csv
+    is always a US state-to-state breakdown of one trade_id's domestic flow
+    (see team/src/main.rs's insert_interstate_rows, which this mirrors).
+
+    `year` is required when target='industrydb' (ignored for 'year_db').
+    interstate.sector1/sector2 FK sector(sector_id) on both targets, and
+    target='industrydb' additionally FKs (year, trade_id) -> trade -- both
+    already satisfied by the time this runs in the comprehensive pipeline,
+    since trade_comprehensive.py's region push (including US) always
+    completes before bea/main.py/this push run.
+
+    Returns the number of rows actually inserted (excludes ON CONFLICT
+    no-ops).
+    """
+    if interstate_df.empty:
+        return 0
+
+    df = interstate_df.copy()
+    df['country'] = country
+
+    columns = [
+        'interstate_id', 'trade_id', 'state1', 'state2', 'sector1', 'sector2',
+        'state_industry_code', 'amount', 'commodity_code', 'industry_code',
+        'economic_multiplier', 'country',
+    ]
+
+    if target == TARGET_SHARED:
+        insert_sql = """
+            INSERT INTO interstate (year, interstate_id, trade_id, country, state1, state2, sector1, sector2, state_industry_code, amount, commodity_code, industry_code, economic_multiplier)
+            SELECT %s, interstate_id, trade_id, country, state1, state2, sector1, sector2, state_industry_code, amount, commodity_code, industry_code, economic_multiplier
+            FROM _interstate_staging
+            ON CONFLICT (year, interstate_id) DO NOTHING
+        """
+        insert_params = (year,)
+    else:
+        insert_sql = """
+            INSERT INTO interstate (interstate_id, trade_id, country, state1, state2, sector1, sector2, state_industry_code, amount, commodity_code, industry_code, economic_multiplier)
+            SELECT interstate_id, trade_id, country, state1, state2, sector1, sector2, state_industry_code, amount, commodity_code, industry_code, economic_multiplier
+            FROM _interstate_staging
+            ON CONFLICT (interstate_id) DO NOTHING
+        """
+        insert_params = None
+
+    return _copy_and_upsert(
+        conn,
+        staging_table='_interstate_staging',
+        staging_ddl_columns="""
+            interstate_id INTEGER, trade_id INTEGER, state1 VARCHAR(10), state2 VARCHAR(10),
+            sector1 VARCHAR(10), sector2 VARCHAR(10), state_industry_code VARCHAR(30),
+            amount NUMERIC(18,4), commodity_code VARCHAR(30), industry_code VARCHAR(30),
+            economic_multiplier NUMERIC(10,6), country VARCHAR(10)
+        """,
+        columns=columns,
+        df=df,
+        insert_sql=insert_sql,
+        insert_params=insert_params,
+    )
+
+
+def push_interstate_factor_rows(conn, interstate_factor_df, year=None, target=TARGET_YEAR_DB):
+    """
+    Same COPY-to-staging-then-INSERT pattern as push_interstate_rows, for
+    interstate_factor (columns: interstate_id, factor_id, level, flow_type).
+    Unlike trade_factor, flow_type ('inter_state'/'intra_state') is already
+    a column in interstate_factor.csv itself -- no per-row lookup needed.
+    factor_id needs no remapping on either target: comprehensive mode's
+    factor.csv is always either the fresh year_db extraction or (for
+    target='industrydb') re-exported from industrydb.factor before
+    bea/main.py runs, so its factor_id values already match the target
+    database's numbering (see trade_comprehensive.py's preflight step).
+
+    `year` is required when target='industrydb' (ignored for 'year_db').
+
+    Returns the number of rows actually inserted.
+    """
+    if interstate_factor_df.empty:
+        return 0
+
+    columns = ['interstate_id', 'factor_id', 'level', 'flow_type']
+
+    if target == TARGET_SHARED:
+        insert_sql = """
+            INSERT INTO interstate_factor (year, interstate_id, factor_id, level, flow_type)
+            SELECT %s, interstate_id, factor_id, level, flow_type
+            FROM _interstate_factor_staging
+            ON CONFLICT (year, interstate_id, factor_id) DO NOTHING
+        """
+        insert_params = (year,)
+    else:
+        insert_sql = """
+            INSERT INTO interstate_factor (interstate_id, factor_id, level, flow_type)
+            SELECT interstate_id, factor_id, level, flow_type
+            FROM _interstate_factor_staging
+            ON CONFLICT (interstate_id, factor_id) DO NOTHING
+        """
+        insert_params = None
+
+    return _copy_and_upsert(
+        conn,
+        staging_table='_interstate_factor_staging',
+        staging_ddl_columns="""
+            interstate_id INTEGER, factor_id INTEGER, level NUMERIC(20,6), flow_type VARCHAR(20)
+        """,
+        columns=columns,
+        df=interstate_factor_df,
         insert_sql=insert_sql,
         insert_params=insert_params,
     )

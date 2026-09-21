@@ -320,12 +320,23 @@ def resolve_interstate_countries():
             result.append(c)
     return result
 
-def run_interstate_step(year, interstate_countries):
+def run_interstate_step(year, interstate_countries, push_target=None):
     """Run each requested country's interstate/state-level script for one
     year, right after that year's trade data finishes. Inherits os.environ,
     which already has EXIOBASE_YEAR set for this year (and BEA_API_KEY
     loaded, if US was requested, found by main()'s pre-flight check before
-    any processing started)."""
+    any processing started).
+
+    push_target: this year's already-resolved COMPREHENSIVE.target
+    ('year_db'/'industrydb'), passed only from the comprehensive branch in
+    main() -- when set, push_interstate.py runs right after bea/main.py
+    succeeds for US, pushing interstate/interstate_factor straight to Azure
+    (see PLAN-comprehensive.md's "Database write path"). None (the curated
+    default/all pipeline) leaves interstate data as local CSVs only, pushed
+    manually via the admin panel's "Send Trade Data to Azure" button, as
+    today -- that panel already covers the curated pipeline's own per-year
+    databases, and auto-pushing there would fight with its resume/dedup
+    workflow."""
     for country in interstate_countries:
         script = INTERSTATE_SCRIPTS[country]
         print(f"\n{'='*100}")
@@ -334,6 +345,13 @@ def run_interstate_step(year, interstate_countries):
         result = subprocess.run([sys.executable, script], cwd=Path(__file__).parent, env=os.environ)
         if result.returncode == 0:
             print(f"[INTERSTATE] {script} completed successfully for {year}")
+            if push_target is not None and country == 'US':
+                print(f"\n[INTERSTATE-PUSH] Pushing {year} interstate data to Azure ({push_target})...")
+                push_result = subprocess.run(
+                    [sys.executable, 'push_interstate.py'], cwd=Path(__file__).parent, env=os.environ,
+                )
+                if push_result.returncode != 0:
+                    print(f"[ERROR] push_interstate.py failed for {year} (exit code {push_result.returncode})")
         else:
             print(f"[ERROR] {script} failed for {year} (exit code {result.returncode})")
 
@@ -505,7 +523,7 @@ def main():
         if get_country_list_value(config).lower() == 'comprehensive':
             run_comprehensive_processing(year)
             if interstate_countries:
-                run_interstate_step(year, interstate_countries)
+                run_interstate_step(year, interstate_countries, push_target=comprehensive_targets[year])
             continue
 
         # Process each tradeflow separately
