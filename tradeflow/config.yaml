@@ -4,9 +4,12 @@ NOTES:
   2: COUNTRY.list "all" = run all (could take hours)
   3: COUNTRY.list "comprehensive" = push 49 country/regions. No per-country trade_id blocks.
     Writes a local year/[year]/[country]/ folder for every one of the 49 regions by default — 
-  4: Set COMPREHENSIVE.folders to "default" to only write folders for the 14
-    default-list countries instead (every region is still pushed to Azure
-    either way; this only controls local .csv output).
+  4: Set COMPREHENSIVE.folders to "default" to limit BOTH local .csv output
+    and the Azure push itself to the 14 default-list countries (changed for
+    the 2024 run -- 2018 used "all", pushing and writing every region).
+    trade_id still counts every one of the 49 regions in Exiobase's own row
+    order, so a skipped region just leaves a gap in the numbering rather
+    than shifting later regions' ids.
   5: COMPREHENSIVE.target picks the Azure database — "year_db" (default) 
     Set to "industrydb" to instead push to the shared multi-year database, with year as a real column on trade/trade_factor
     If multiple comma-separated YEAR datasets are listed, the year must match the YEAR list.

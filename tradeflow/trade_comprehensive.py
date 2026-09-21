@@ -56,12 +56,16 @@ def confirm_comprehensive_push(year, target, folder_regions):
     """
     Prints where this run's data is headed and, on a TTY, blocks for a
     literal "y" before continuing -- there's no undo for a real push to
-    Azure, and this is the first mode that pushes ALL 49 regions in one
-    call rather than one country at a time. Non-interactive runs (cron,
-    main.py's automated NODES pipeline) have no stdin to read a reply from,
-    so they instead require EXIOBASE_COMPREHENSIVE_CONFIRM=yes to already be
-    set -- failing fast with an explicit message rather than hanging on
-    input() forever.
+    Azure. Non-interactive runs (cron, main.py's automated NODES pipeline)
+    have no stdin to read a reply from, so they instead require
+    EXIOBASE_COMPREHENSIVE_CONFIRM=yes to already be set -- failing fast
+    with an explicit message rather than hanging on input() forever.
+
+    folder_regions is also the push scope as of the 2024 run (see
+    run_comprehensive's region loop and PLAN-comprehensive.md's "Database
+    write path" -- COMPREHENSIVE.folders="default" now limits the Azure
+    push to those regions too, not just local .csv output; 2018 used
+    folders="all", pushing and writing every region).
     """
     db_name, db_note = describe_comprehensive_target(year, target)
     host = os.environ.get('EXIOBASE_HOST', '(EXIOBASE_HOST not set)')
@@ -71,7 +75,7 @@ def confirm_comprehensive_push(year, target, folder_regions):
     print(f"{'='*80}")
     print(f"  Target database : {db_name}  (Azure PostgreSQL @ {host})")
     print(f"                    {db_note}")
-    print(f"  Regions pushed  : all 49 Exiobase regions -> trade + trade_factor")
+    print(f"  Regions pushed  : {len(folder_regions)}/49 Exiobase regions -> trade + trade_factor")
     print(f"  Local folders   : {len(folder_regions)}/49 written under year/{year}/<region>/")
     print(f"{'='*80}")
 
@@ -105,8 +109,16 @@ def run_comprehensive(year):
     target = get_comprehensive_target(config)
     from main import get_default_countries
     default_countries = set(get_default_countries())
+    # folder_regions is also the Azure push scope, as of the 2024 run (see
+    # the region loop below) -- "default" now means only these regions'
+    # trade/trade_factor rows reach Azure at all, not just local .csv
+    # output. trade_id numbering still runs across all 49 regions in
+    # Exiobase's own fixed order regardless (see running_trade_id below),
+    # so an excluded region's rows leave a gap in the sequence rather than
+    # shifting later regions' ids -- a later "all" run for the same year
+    # would assign the exact same ids to the already-pushed regions.
     folder_regions = set(EXIOBASE_REGIONS) if folders_scope == 'all' else default_countries
-    print(f"[COMPREHENSIVE] COMPREHENSIVE.folders={folders_scope} -> local folders for {len(folder_regions)}/{len(EXIOBASE_REGIONS)} regions")
+    print(f"[COMPREHENSIVE] COMPREHENSIVE.folders={folders_scope} -> local folders + Azure push for {len(folder_regions)}/{len(EXIOBASE_REGIONS)} regions")
     print(f"[COMPREHENSIVE] COMPREHENSIVE.target={target}")
 
     confirm_comprehensive_push(year, target, folder_regions)
@@ -193,6 +205,16 @@ def run_comprehensive(year):
             running_trade_id += n
             region_ranges[region] = (base + 1, running_trade_id)
 
+            # Out-of-scope region (COMPREHENSIVE.folders="default"): trade_id
+            # still advances past its rows -- preserving the same numbering a
+            # full "all" run would assign -- but nothing is computed or
+            # pushed for it. See run_comprehensive's folder_regions comment.
+            if region not in folder_regions:
+                elapsed = time.time() - region_start
+                print(f"  {region}: out of scope (COMPREHENSIVE.folders={folders_scope}) -- "
+                      f"{n} row(s) reserved (ids {base+1}-{running_trade_id}), nothing pushed, in {elapsed:.1f}s")
+                continue
+
             trade_factor_chunk = compute_trade_factor(
                 trade_chunk, exio_model, sector_mapping, factor_mapping,
                 use_large_factors=False, log=None,
@@ -204,24 +226,23 @@ def run_comprehensive(year):
                 conn, trade_factor_chunk, region, trade_id_flow_type, year=year, target=target,
             )
 
-            if region in folder_regions:
-                domestic_rows = trade_chunk[trade_chunk['region2'] == region]
-                exports_rows = trade_chunk[trade_chunk['region2'] != region]
-                domestic_ids = set(domestic_rows['trade_id'])
-                exports_ids = set(exports_rows['trade_id'])
-                domestic_factor = trade_factor_chunk[trade_factor_chunk['trade_id'].isin(domestic_ids)]
-                exports_factor = trade_factor_chunk[trade_factor_chunk['trade_id'].isin(exports_ids)]
+            domestic_rows = trade_chunk[trade_chunk['region2'] == region]
+            exports_rows = trade_chunk[trade_chunk['region2'] != region]
+            domestic_ids = set(domestic_rows['trade_id'])
+            exports_ids = set(exports_rows['trade_id'])
+            domestic_factor = trade_factor_chunk[trade_factor_chunk['trade_id'].isin(domestic_ids)]
+            exports_factor = trade_factor_chunk[trade_factor_chunk['trade_id'].isin(exports_ids)]
 
-                write_flow_csv(config, region, 'domestic', domestic_rows, domestic_factor)
-                write_flow_csv(config, region, 'exports', exports_rows, exports_factor)
+            write_flow_csv(config, region, 'domestic', domestic_rows, domestic_factor)
+            write_flow_csv(config, region, 'exports', exports_rows, exports_factor)
 
-                if region not in default_countries:
-                    write_comprehensive_runnote(
-                        config, year, region, 'domestic',
-                        source="trade_comprehensive.py (sliced from in-memory region chunk)",
-                    )
-                    write_comprehensive_runnote(
-                        config, year, region, 'exports',
+            if region not in default_countries:
+                write_comprehensive_runnote(
+                    config, year, region, 'domestic',
+                    source="trade_comprehensive.py (sliced from in-memory region chunk)",
+                )
+                write_comprehensive_runnote(
+                    config, year, region, 'exports',
                         source="trade_comprehensive.py (sliced from in-memory region chunk)",
                     )
 
@@ -231,8 +252,9 @@ def run_comprehensive(year):
                   f"(a gap below the total means those rows already existed from a previous run) in {elapsed:.1f}s")
 
         total_elapsed = time.time() - total_start
-        print(f"\n[COMPREHENSIVE] All 49 regions pushed to {target_db_name}: "
-              f"{running_trade_id} trade rows total, {total_elapsed/60:.1f} minutes")
+        print(f"\n[COMPREHENSIVE] {len(folder_regions)}/{len(EXIOBASE_REGIONS)} regions pushed to {target_db_name} "
+              f"(trade_id 1-{running_trade_id} reserved across all 49, per Exiobase's own row order): "
+              f"{total_elapsed/60:.1f} minutes")
 
         print(f"\n[COMPREHENSIVE] Pulling imports for {len(folder_regions)} in-scope region(s) from {target_db_name}...")
         for region in sorted(folder_regions):

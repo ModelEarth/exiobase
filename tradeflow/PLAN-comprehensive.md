@@ -102,40 +102,49 @@ is the part that doesn't scale to 49 regions:
   network hops for the actual database load, whether or not a local folder also gets written.
 - **Per-country `trade_id` blocks aren't needed.** They exist so that adding country #15 to an
   *already-loaded* database can't collide with country #1's ids. Comprehensive builds the entire
-  year in one shot, so a plain 1-based sequential id has no gaps and can't collide with itself —
-  see "Trade ID scheme" below for why it also can't collide with anything already in `industrydb`.
+  year in one shot, so a plain 1-based sequential id (per Exiobase's own row order, across all 49
+  regions) can't collide with itself, whether or not every region actually gets pushed — see
+  "Trade ID scheme" below for why it also can't collide with anything already in `industrydb`.
+  With `COMPREHENSIVE.folders: default` (added for the 2024 run — see below), the excluded
+  regions' ids are simply never inserted, leaving gaps rather than shifting later regions' ids; a
+  later `folders: all` run for the same year would assign those exact same ids to the
+  now-newly-included regions.
 
-Local file *volume* is a separate, genuine tradeoff, not eliminated by any of the above: 49
-regions' worth of `trade.csv`/`trade_factor.csv` is real disk/git footprint that the curated
-14-country list never had to carry. `comprehensive` defaults to accepting that footprint (see
-`COMPREHENSIVE.folders` below) because generating it costs nothing extra in *compute* — the
-region-chunk that would produce a local file is already sitting in memory for all 49 regions
-regardless of how many folders get written (see "Extraction" below) — but it's still real bytes on
-disk and, if committed, in `trade-data`'s git history. `COMPREHENSIVE.folders: default` exists
-specifically for whoever wants comprehensive's Azure coverage without that footprint.
+Local file *volume* is a separate, genuine tradeoff: 49 regions' worth of `trade.csv`/
+`trade_factor.csv` is real disk/git footprint that the curated 14-country list never had to carry.
+2018's run accepted that footprint in full (`COMPREHENSIVE.folders: all`) because generating it
+cost nothing extra in *compute* at the time — the region-chunk that would produce a local file was
+already sitting in memory for all 49 regions regardless of how many folders got written (see
+"Extraction" below). Starting with the 2024 run, `COMPREHENSIVE.folders: default` no longer only
+skips the local file for an excluded region — it also skips computing `trade_factor` and pushing
+that region to Azure at all (see the region loop in `trade_comprehensive.py`), since a comprehensive
+run using only the 14 default countries has no use for the other 35 regions' data in either form.
 
-## `config.yaml`: add `comprehensive` as a third `COUNTRY.list` option, plus a folder-scope knob
+## `config.yaml`: add `comprehensive` as a third `COUNTRY.list` option, plus a scope knob
 
 Today's `NOTES` section documents two `COUNTRY.list` values that `resolve_country_list()` in
 `main.py` special-cases: `default` (14 countries) and `all` (whatever country folders already
 exist on disk, i.e. the short curated list currently in `trade-data/year/{year}/`). Add a third,
-plus a new, independent `COMPREHENSIVE.folders` setting controlling how many of the 49 pushed
-regions also get a local folder (default: all 49):
+plus a new `COMPREHENSIVE.folders` setting controlling how many of the 49 regions get pushed to
+Azure *and* get a local folder (default: all 49 — see the note above on the 2024 change):
 
 ```yaml
 NOTES:
   1: COUNTRY.list "default" = run only incomplete ones within AU, BR, CA,
     CN, DE, FR, GB, IN, IT, JP, KR, RU, WM, US
   2: COUNTRY.list "all" = run all (could take hours)
-  3: COUNTRY.list "comprehensive" = push every Exiobase region (all 49 —
-    see PLAN-comprehensive.md) directly to Azure for one year. No
+  3: COUNTRY.list "comprehensive" = process every Exiobase region (all 49 —
+    see PLAN-comprehensive.md) in one extraction for one year. No
     per-country trade_id blocks. Set TRADEFLOW to anything; comprehensive
     ignores it (imports/exports/domestic all come out of one extraction —
-    see PLAN-comprehensive.md). Writes a local year/[year]/[country]/
-    folder for every one of the 49 regions by default — set
-    COMPREHENSIVE.folders to "default" to only write folders for the 14
-    default-list countries instead (every region is still pushed to Azure
-    either way; this only controls local .csv output).
+    see PLAN-comprehensive.md). Pushes to Azure and writes a local
+    year/[year]/[country]/ folder for every one of the 49 regions by
+    default — set COMPREHENSIVE.folders to "default" to limit BOTH the
+    Azure push and local .csv output to just the 14 default-list countries
+    (changed for the 2024 run; 2018 used "all"). trade_id still counts
+    every one of the 49 regions in Exiobase's own row order regardless, so
+    a region outside the scope just leaves a gap in the numbering, rather
+    than shifting later regions' ids — see "Trade ID scheme" below.
   4: COMPREHENSIVE.target picks the Azure database — "year_db" (default) —
     a dedicated industrydb_[year] database, created if missing, with no
     year column needed since trade_id is globally sequential within that
@@ -146,7 +155,7 @@ NOTES:
     setting the same way EXIOBASE_COMPREHENSIVE_FOLDERS overrides
     COMPREHENSIVE.folders.
 COMPREHENSIVE:
-  folders: all   # "all" (default, all 49 regions get a local folder) | "default" (only the 14 default-list countries)
+  folders: all   # "all" (default, all 49 regions pushed to Azure + get a local folder) | "default" (only the 14 default-list countries, either way)
   target: year_db   # "year_db" (default, dedicated industrydb_[year]) | "industrydb" (shared multi-year database)
 ```
 
@@ -339,16 +348,17 @@ when A had its turn. `flow_type` on each row can just be `'domestic'` (region1 =
 that distinction was only ever about *whose file* a row came from, and there's only one file now.
 `country` becomes `region1` (the exporter) for the same reason.
 
-**All 49 regions get pushed to the target database (`industrydb_{year}` or the shared `industrydb`
-— see "Database write path" below); all 49 get a local folder too, by default.** The loop above
-runs for every region regardless — that's what makes the year "comprehensive" — and since a
-region's own chunk (exports+domestic) is already sitting in memory the moment that region has its
-turn, writing it to `year/{year}/{country}/{domestic,exports}/trade.csv` costs nothing extra in
-compute for any of the 49, not just the curated 14 (see "Local `.csv` output for country folders"
-below for exactly what's written per region, and how `imports` — the one flow type that isn't free
-— gets added afterward). Set `COMPREHENSIVE.folders: default` in `config.yaml` to fall back to only
-the 14 `default`-list regions if the other 35 regions' disk/git footprint isn't wanted; the target
-database gets all 49 either way.
+**By default (`COMPREHENSIVE.folders: all`, 2018's setting), all 49 regions get pushed to the
+target database (`industrydb_{year}` or the shared `industrydb` — see "Database write path" below)
+and a local folder too.** The extraction loop above still runs for every region regardless of
+`COMPREHENSIVE.folders` — that's what keeps `trade_id` numbering identical to a full comprehensive
+run even when most regions get excluded (see "Trade ID scheme" above) — but as of the 2024 run,
+`COMPREHENSIVE.folders: default` stops the loop from computing `trade_factor` or pushing anything
+for the 35 non-default regions, not just from writing their local folder: only the 14 `default`-list
+regions' chunks (already sitting in memory the moment that region has its turn, so the local file
+costs nothing extra in compute — see "Local `.csv` output for country folders" below) get pushed
+and written at all. `EXIOBASE_COMPREHENSIVE_FOLDERS`/`COMPREHENSIVE.folders: all` is still available
+for a future year that wants full 49-region Azure coverage again.
 
 ## Memory management: stream by region, don't materialize the global matrix
 
