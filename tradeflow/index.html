@@ -249,6 +249,7 @@ waitForLocalsiteJs();
       <option value="2021">2021</option>
       <option value="2020">2020</option>
       <option value="2019" selected>2019</option>
+      <option value="2018">2018</option>
     </select>
     <!-- Button looks good, but is not needed currently.
     <button class="btn-insert" id="btnInsertData">
@@ -321,7 +322,7 @@ waitForLocalsiteJs();
   'use strict';
 
   const RUST_API = 'http://localhost:8081/api';
-  const YEARS = ['2023','2022','2021','2020','2019'];
+  const YEARS = ['2023','2022','2021','2020','2019','2018'];
 
   // ---- Hash helpers ----
   function safeGetHash() {
@@ -859,8 +860,8 @@ waitForLocalsiteJs();
       sector: [{name:'sector_id',type:'varchar(10)'},{name:'name',type:'text'}],
       sector_industry: [{name:'sector_id',type:'varchar(10)'},{name:'industry_id',type:'varchar(10)'},{name:'weight',type:'numeric'}],
       factor:   [{name:'factor_id',type:'integer'},{name:'unit',type:'varchar(50)'},{name:'stressor',type:'text'},{name:'extension',type:'varchar(100)'}],
-      trade:    [{name:'trade_id',type:'integer'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(10)'},{name:'country',type:'varchar(10)'}],
-      trade_factor: [{name:'trade_id',type:'integer'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(10)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
+      trade:    [{name:'trade_id',type:'integer'},{name:'region1',type:'varchar(10)'},{name:'region2',type:'varchar(10)'},{name:'industry1',type:'varchar(10)'},{name:'industry2',type:'varchar(10)'},{name:'amount',type:'numeric'},{name:'flow_type',type:'varchar(20)'},{name:'country',type:'varchar(10)'}],
+      trade_factor: [{name:'trade_id',type:'integer'},{name:'country',type:'varchar(10)'},{name:'flow_type',type:'varchar(20)'},{name:'factor_id',type:'integer'},{name:'coefficient',type:'numeric'},{name:'level',type:'numeric'}],
       interstate: [{name:'interstate_id',type:'varchar(80)'},{name:'trade_id',type:'integer'},{name:'state1',type:'varchar(10)'},{name:'state2',type:'varchar(10)'},{name:'sector1',type:'varchar(10)'},{name:'sector2',type:'varchar(10)'},{name:'state_industry_code',type:'varchar(30)'},{name:'amount',type:'numeric'},{name:'commodity_code',type:'varchar(30)'},{name:'industry_code',type:'varchar(30)'},{name:'economic_multiplier',type:'numeric'}],
       interstate_factor: [{name:'interstate_id',type:'varchar(80)'},{name:'factor_id',type:'integer'},{name:'level',type:'numeric'},{name:'flow_type',type:'varchar(20)'}],
       // interstate_estimate is commented out — real satellite factor data has
@@ -874,7 +875,9 @@ waitForLocalsiteJs();
       // blocks" section. trade.country -> region.country is a real FK
       // (added below in the relationship list) — every region row is
       // created before any trade row referencing that country is inserted.
-      region: [{name:'country',type:'varchar(10)'},{name:'block_index',type:'integer'}]
+      // name is nullable: only comprehensive mode's full-49-region seed
+      // supplies a display name — see team repo's PLAN-comprehensive.md.
+      region: [{name:'country',type:'varchar(10)'},{name:'block_index',type:'integer'},{name:'name',type:'varchar(100)'}]
     };
   }
 
