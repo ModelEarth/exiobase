@@ -159,6 +159,22 @@ bare-name alias — `YEAR`/`COUNTRY_LIST`/`DB_TARGET` — for a shorter comprehe
 (`YEAR=2018 COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py`); the `EXIOBASE_`-prefixed
 name wins if both are set, so the short form is a convenience, not a second source of truth.
 
+`DB_TARGET` (optional — omitting it defaults every year to `year_db`) also accepts a
+comma-separated list when `YEAR` is itself a comma-separated multi-year list: either one value
+applied to every year, or exactly one target per year, positionally matched in the same order.
+Either form's entries may be an explicit per-year database name (`industrydb_2018`) instead of the
+bare `year_db` keyword — `config_loader.resolve_comprehensive_targets(years, target_value)` checks
+that name's year against its corresponding `YEAR` entry, called once in `main.py` before the
+per-year processing loop starts (not per year, and not inside `trade_comprehensive.py`'s
+subprocess), and raises before anything runs if they don't align, or if `DB_TARGET`'s list length
+doesn't match `YEAR`'s. This is specifically to catch `YEAR=2019 DB_TARGET=industrydb_2018` (or the
+comma-separated equivalent for one position in a multi-year run) — a typo that would otherwise
+silently push one year's data into another year's database rather than failing up front. Once
+validated, `main.py` re-exports each year's already-resolved single target as
+`EXIOBASE_COMPREHENSIVE_TARGET` right alongside its existing per-year `EXIOBASE_YEAR` re-export, so
+`trade_comprehensive.py`'s own `get_comprehensive_target()` (used inside the subprocess) only ever
+sees one plain `year_db`/`industrydb` value, never the raw list.
+
 `main.py` needs one new early branch, not a change to `resolve_country_list()` itself (that
 function's job — turning a country list into... a country list — doesn't fit "there is no country
 list, run one job for the whole year"). In `process_tradeflow`'s caller (the per-year loop around

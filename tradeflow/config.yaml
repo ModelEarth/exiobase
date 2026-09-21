@@ -23,6 +23,11 @@ NOTES:
     EXIOBASE_COMPREHENSIVE_TARGET (same for YEAR/EXIOBASE_YEAR and
     COUNTRY_LIST/EXIOBASE_COUNTRY_LIST) -- e.g. YEAR=2018
     COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py.
+    DB_TARGET is optional; with multiple comma-separated YEARs it can be
+    one value for all of them or a comma-separated list (one per year,
+    same order) -- an explicit industrydb_[year] entry whose year doesn't
+    match its position's YEAR value stops the run before anything starts,
+    instead of silently pushing that year's data into the wrong database.
 TRADEFLOW: domestic,imports,exports
 YEAR: 2021
 COUNTRY:

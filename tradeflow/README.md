@@ -68,11 +68,19 @@ python bea/main.py --bea-key YOUR_API_KEY
 python india/main.py
 ```
 
-**Comprehensive mode** (`COUNTRY.list: comprehensive` in config.yaml, or `EXIOBASE_COUNTRY_LIST=comprehensive`/`COUNTRY_LIST=comprehensive`) pushes all 49 Exiobase regions for a year straight to Azure in one run, instead of a curated country list. `COMPREHENSIVE.target` (or `EXIOBASE_COMPREHENSIVE_TARGET`/`DB_TARGET`) picks which Azure database: `year_db` (default) creates a dedicated `industrydb_[year]`, or `industrydb` adds into the shared multi-year database instead. `YEAR`/`COUNTRY_LIST`/`DB_TARGET` are short aliases for `EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`/`EXIOBASE_COMPREHENSIVE_TARGET` (the `EXIOBASE_`-prefixed name wins if both are set):
+**Comprehensive mode** (`COUNTRY.list: comprehensive` in config.yaml, or `EXIOBASE_COUNTRY_LIST=comprehensive`/`COUNTRY_LIST=comprehensive`) pushes all 49 Exiobase regions for a year straight to Azure in one run, instead of a curated country list. `COMPREHENSIVE.target` (or `EXIOBASE_COMPREHENSIVE_TARGET`/`DB_TARGET`, optional — defaults to `year_db`) picks which Azure database: `year_db` creates a dedicated `industrydb_[year]`, or `industrydb` adds into the shared multi-year database instead. `YEAR`/`COUNTRY_LIST`/`DB_TARGET` are short aliases for `EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`/`EXIOBASE_COMPREHENSIVE_TARGET` (the `EXIOBASE_`-prefixed name wins if both are set):
 
 ```bash
 YEAR=2018 COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py
 ```
+
+With multiple years in `YEAR` (comma-separated), `DB_TARGET` can either be one value applied to every year, or a comma-separated list with exactly one entry per year, in the same order:
+
+```bash
+YEAR=2018,2019 COUNTRY_LIST=comprehensive DB_TARGET=industrydb_2018,year_db python main.py
+```
+
+`DB_TARGET` entries can also be an explicit per-year database name (`industrydb_[year]`) instead of the bare `year_db` keyword — main.py checks that name's year against the corresponding `YEAR` entry before anything runs, and refuses to start if they don't match (a mismatch like `YEAR=2019` with `DB_TARGET=industrydb_2018` is exactly the kind of typo that would otherwise silently push one year's data into another year's database).
 
 See [PLAN-comprehensive.md](PLAN-comprehensive.md) for the full design.
 

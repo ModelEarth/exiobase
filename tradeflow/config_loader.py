@@ -4,6 +4,7 @@ Configuration loader for Exiobase Trade Flow Analysis
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -110,6 +111,73 @@ def get_comprehensive_target(config):
     comprehensive = config.get('COMPREHENSIVE') or {}
     target = str(comprehensive.get('target', 'year_db')).strip().lower()
     return 'industrydb' if target == 'industrydb' else 'year_db'
+
+
+_INDUSTRYDB_YEAR_RE = re.compile(r'^industrydb_(\d{4})$', re.IGNORECASE)
+
+
+def resolve_comprehensive_targets(years, target_value):
+    """
+    Resolve COMPREHENSIVE.target/DB_TARGET into one target per year in
+    `years` (a list of ints, already resolved from YEAR/EXIOBASE_YEAR).
+    `target_value` is the raw, un-lowercased config/env value main.py reads
+    off `config['COMPREHENSIVE']['target']` -- optional (falsy, i.e.
+    DB_TARGET/COMPREHENSIVE.target not set) defaults every year to
+    'year_db'.
+
+    Accepts a single value applied to every year ("year_db" or
+    "industrydb"), or a comma-separated list with exactly one entry per
+    year in `years`, positionally matched in the same order. Either form's
+    entries may also be an explicit per-year database name
+    ("industrydb_2018") instead of the bare "year_db" keyword -- checked
+    against that position's actual year and rejected if they don't match,
+    since a mismatched explicit name (e.g. YEAR=2019 with
+    DB_TARGET=industrydb_2018) is exactly the kind of typo that would
+    otherwise silently push one year's data into another year's database
+    rather than failing before anything runs.
+
+    Returns {year: 'year_db' | 'industrydb'}. Raises ValueError (message
+    meant to be shown directly to the user, e.g. via `sys.exit(str(e))`,
+    not a traceback) on any mismatch -- callers should do this validation
+    once, before the per-year processing loop starts, not per year.
+    """
+    if not target_value:
+        return {year: 'year_db' for year in years}
+
+    raw_targets = [v.strip() for v in str(target_value).split(',') if v.strip()]
+
+    if len(raw_targets) == 1:
+        raw_targets = raw_targets * len(years)
+    elif len(raw_targets) != len(years):
+        raise ValueError(
+            f"DB_TARGET has {len(raw_targets)} value(s) ({', '.join(raw_targets)}) but YEAR has "
+            f"{len(years)} year(s) ({', '.join(str(y) for y in years)}) -- set one DB_TARGET for "
+            "every year, or exactly one per year, comma-separated in the same order as YEAR."
+        )
+
+    resolved = {}
+    for year, raw in zip(years, raw_targets):
+        lowered = raw.lower()
+        named_year_match = _INDUSTRYDB_YEAR_RE.match(lowered)
+        if named_year_match:
+            named_year = int(named_year_match.group(1))
+            if named_year != year:
+                raise ValueError(
+                    f"DB_TARGET={raw!r} names {named_year}, but the corresponding YEAR value is "
+                    f"{year} -- refusing to run in case this is a typo that would push {year}'s "
+                    f"data into {named_year}'s database. Use 'year_db' (or industrydb_{year}) "
+                    f"for {year}."
+                )
+            resolved[year] = 'year_db'
+        elif lowered in ('year_db', 'industrydb'):
+            resolved[year] = lowered
+        else:
+            raise ValueError(
+                f"Unknown DB_TARGET value {raw!r} for year {year} -- expected 'year_db', "
+                f"'industrydb', or an explicit 'industrydb_{year}'-style name matching that year."
+            )
+
+    return resolved
 
 def update_config(updates):
     """

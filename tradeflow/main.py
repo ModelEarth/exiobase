@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from config_loader import load_config  # also validates PyYAML is installed
+from config_loader import load_config, resolve_comprehensive_targets  # also validates PyYAML is installed
 import yaml
 
 # Set UTF-8 encoding for Windows console
@@ -447,6 +447,21 @@ def main():
     if len(years) > 1:
         print(f"[YEARS] Processing multiple years: {', '.join(str(y) for y in years)}")
 
+    # COMPREHENSIVE.target/DB_TARGET validation, once, before any year's
+    # processing starts -- resolve_comprehensive_targets rejects a
+    # DB_TARGET/YEAR count mismatch and an explicit industrydb_YYYY name
+    # that doesn't match its corresponding YEAR entry (see
+    # PLAN-comprehensive.md's "Database write path"), so a typo fails
+    # immediately instead of after downloading Exiobase files or, worse,
+    # after pushing one year's data into another year's database.
+    comprehensive_targets = None
+    if get_country_list_value(config).lower() == 'comprehensive':
+        raw_target = (config.get('COMPREHENSIVE') or {}).get('target')
+        try:
+            comprehensive_targets = resolve_comprehensive_targets(years, raw_target)
+        except ValueError as e:
+            sys.exit(str(e))
+
     # Handle comma-separated tradeflows
     if ',' in tradeflow_config:
         tradeflows = [tf.strip() for tf in tradeflow_config.split(',')]
@@ -477,6 +492,12 @@ def main():
         # Subprocesses inherit os.environ, so re-export a single resolved
         # year even if the shell originally passed a comma-separated list.
         os.environ['EXIOBASE_YEAR'] = str(year)
+        # Same reasoning for COMPREHENSIVE.target/DB_TARGET: each
+        # subprocess (trade_comprehensive.py) only ever sees this one
+        # year's already-validated target, never the raw possibly-
+        # comma-separated DB_TARGET list.
+        if comprehensive_targets is not None:
+            os.environ['EXIOBASE_COMPREHENSIVE_TARGET'] = comprehensive_targets[year]
 
         # COUNTRY.list "comprehensive" replaces the normal per-tradeflow/
         # per-country loop entirely for this year -- it ignores TRADEFLOW
