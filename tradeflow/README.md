@@ -9,6 +9,8 @@ Table naming designed for 3rd graders. [View Report Sample](../../profile/footpr
 
 **The trade_id field** in trade.csv relates 4 values (region1, region2, industry1, industry2) to multiple impact factors for each trade row.
 
+**region1 is always the exporter and region2 is always the importer**, regardless of being in the exports, imports or domestic folder.
+
 **The factor_id field** represents 721 unique impacts applied to each annual trade row (for imports, exports and domestic).
 
 **trade.amount** is in **million Euros (M EUR)**, sourced directly from the Exiobase Z matrix (inter-industry transaction flows). Environmental factor coefficients are expressed per million EUR of output.
