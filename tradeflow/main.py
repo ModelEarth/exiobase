@@ -110,8 +110,26 @@ def is_country_completed(country, tradeflow, year):
     config = load_config()
     # Use the folder path from config for the specific tradeflow
     folder_path = config['FOLDERS'][tradeflow].format(year=year, country=country)
-    runnote_path = Path(folder_path) / "runnote.md"
-    return runnote_path.exists()
+    folder = Path(folder_path)
+    if not (folder / "runnote.md").exists():
+        return False
+
+    # runnote.md alone isn't reliable on its own -- it's written once by
+    # run_country_processing and never touched again, so a country
+    # processed before a script was added to the pipeline (e.g.
+    # trade_competitiveness.py) would otherwise be considered complete
+    # forever, silently keeping stale/incomplete output. Also require the
+    # tradeflow-specific file trade_competitiveness.py produces; domestic
+    # has no such file (trade_competitiveness.py skips it), so nothing extra
+    # to check there.
+    expected_file = {
+        'exports': 'export_competitiveness.csv',
+        'imports': 'import_dependency.csv',
+    }.get(tradeflow)
+    if expected_file and not (folder / expected_file).exists():
+        return False
+
+    return True
 
 def filter_incomplete_countries(countries, tradeflow, year):
     """Filter out countries that have already completed processing"""
