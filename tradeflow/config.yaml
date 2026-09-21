@@ -17,7 +17,9 @@ NOTES:
     database. Set to "industrydb" to instead push to the shared,
     multi-year database, with year as a real column on trade/trade_factor
     and trade_id unique only per year (see PLAN-comprehensive.md's
-    "Database write path").
+    "Database write path"). EXIOBASE_COMPREHENSIVE_TARGET overrides this
+    setting the same way EXIOBASE_COMPREHENSIVE_FOLDERS overrides
+    COMPREHENSIVE.folders.
 TRADEFLOW: domestic,imports,exports
 YEAR: 2021
 COUNTRY:

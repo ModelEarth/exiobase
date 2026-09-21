@@ -68,6 +68,8 @@ python bea/main.py --bea-key YOUR_API_KEY
 python india/main.py
 ```
 
+**Comprehensive mode** (`COUNTRY.list: comprehensive` in config.yaml, or `EXIOBASE_COUNTRY_LIST=comprehensive`) pushes all 49 Exiobase regions for a year straight to Azure in one run, instead of a curated country list. `COMPREHENSIVE.target` (or `EXIOBASE_COMPREHENSIVE_TARGET`) picks which Azure database: `year_db` (default) creates a dedicated `industrydb_[year]`, or `industrydb` adds into the shared multi-year database instead. See [PLAN-comprehensive.md](PLAN-comprehensive.md) for the full design.
+
 Lastly, [Send CSV into SQL database](https://github.com/ModelEarth/projects/issues/30):
 
 
