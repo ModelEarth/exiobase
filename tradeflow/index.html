@@ -244,6 +244,7 @@ waitForLocalsiteJs();
   <div class="tradeflow-controls">
     <label for="tradeflowYear">Year:</label>
     <select id="tradeflowYear">
+      <option value="2024">2024</option>
       <option value="2023">2023</option>
       <option value="2022">2022</option>
       <option value="2021">2021</option>
@@ -284,7 +285,7 @@ waitForLocalsiteJs();
     </div>
     <div class="schema-source">
       <a href="#" id="schemaAboutToggle">About schema</a>
-      <a href="https://github.com/ModelEarth/trade-data/tree/main/year/2023" id="schemaSourceLink" target="_parent">Data source</a>
+      <a href="https://github.com/ModelEarth/trade-data/tree/main/year/2024" id="schemaSourceLink" target="_parent">Data source</a>
     </div>
   </div>
 
@@ -321,7 +322,7 @@ waitForLocalsiteJs();
   'use strict';
 
   const RUST_API = 'http://localhost:8081/api';
-  const YEARS = ['2023','2022','2021','2020','2019','2018'];
+  const YEARS = ['2024','2023','2022','2021','2020','2019','2018'];
 
   // ---- Hash helpers ----
   function safeGetHash() {
