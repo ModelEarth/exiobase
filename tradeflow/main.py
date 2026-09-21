@@ -335,13 +335,26 @@ def run_interstate_step(year, interstate_countries, push_target=None):
     manually via the admin panel's "Send Trade Data to Azure" button, as
     today -- that panel already covers the curated pipeline's own per-year
     databases, and auto-pushing there would fight with its resume/dedup
-    workflow."""
+    workflow.
+
+    EXIOBASE_COUNTRY_LIST is pinned to this single country in the
+    subprocess's own environment -- bea/main.py's own internal trade.py-
+    style calls (Phase 1's existing-file check and, if missing, extraction)
+    resolve their target country straight from config['COUNTRY'], with no
+    idea what "comprehensive" means. Inheriting a comprehensive run's
+    COUNTRY_LIST=comprehensive unpinned made bea/main.py check for (and,
+    finding none, "generate") a trade.csv under a bogus year/{year}/
+    comprehensive/ folder instead of finding the real, already-written
+    year/{year}/US/domestic/trade.csv -- confirmed against a real 2024 run
+    (0 rows written, wrong path, and Phase 3's state-level disaggregation
+    then failed outright against that empty data)."""
     for country in interstate_countries:
         script = INTERSTATE_SCRIPTS[country]
         print(f"\n{'='*100}")
         print(f"[INTERSTATE] STARTING {script} FOR YEAR: {year} ({country})")
         print(f"{'='*100}")
-        result = subprocess.run([sys.executable, script], cwd=Path(__file__).parent, env=os.environ)
+        interstate_env = {**os.environ, 'EXIOBASE_COUNTRY_LIST': country}
+        result = subprocess.run([sys.executable, script], cwd=Path(__file__).parent, env=interstate_env)
         if result.returncode == 0:
             print(f"[INTERSTATE] {script} completed successfully for {year}")
             if push_target is not None and country == 'US':
