@@ -12,12 +12,12 @@ NOTES:
     default-list countries instead (every region is still pushed to Azure
     either way; this only controls local .csv output).
   4: COMPREHENSIVE.target picks the Azure database — "year_db" (default) —
-    a dedicated industrydb_[year] database, created if missing, the same
-    per-year convention already used for industrydb_2019/2021/2023 — no
-    year column needed, trade_id is globally sequential within that
-    database. "industrydb" — the shared, multi-year database instead,
-    with year as a real column on trade/trade_factor and trade_id unique
-    only per year (see PLAN-comprehensive.md's "Database write path").
+    a dedicated industrydb_[year] database, created if missing, with no
+    year column needed since trade_id is globally sequential within that
+    database. Set to "industrydb" to instead push to the shared,
+    multi-year database, with year as a real column on trade/trade_factor
+    and trade_id unique only per year (see PLAN-comprehensive.md's
+    "Database write path").
 TRADEFLOW: domestic,imports,exports
 YEAR: 2021
 COUNTRY:
