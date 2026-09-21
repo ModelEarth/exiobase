@@ -418,7 +418,6 @@ def process_tradeflow(config, tradeflow, all_countries, countries, completed_cou
     print(f"All countries: {', '.join(all_countries)}")
     print(f"Countries to process: {', '.join(countries) if countries else 'None - All completed!'}")
     print(f"Total countries to process: {len(countries)}")
-    print(f"Time allocation: 5 hours total for entire batch")
     print(f"Estimated time per country: ~{300/len(countries) if countries else 0:.0f} minutes")
     
     # If all countries are completed, show summary and exit
