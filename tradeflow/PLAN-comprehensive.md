@@ -1,41 +1,58 @@
-# Comprehensive trade push: every region, direct to Azure, no per-country CSVs
+# Comprehensive trade push: every region, direct to Azure, local folders for all 49 by default
 
 Plan for a new `comprehensive` processing mode that extracts trade flows for **every** Exiobase
 region in one pass (not a curated 14-country list) and writes them straight into the shared
-`industrydb` Azure Postgres database, without generating the large per-country/per-flow-type
-`.csv` files `trade.py` writes today. Initial target year: **2018**.
+`industrydb` Azure Postgres database. By default it also writes a local `year/{year}/{country}/`
+folder for **all 49 regions** (not just the curated 14) — see `COMPREHENSIVE.folders` below for
+scoping that down to just the 14 when the full 49's disk/git footprint isn't wanted. Initial
+target year: **2018**.
 
 This is additive: `default`/`all` keep working exactly as they do now (curated country list,
 local CSVs, `POST /api/db/insert-trade-data`, per-country `trade_id` blocks). `comprehensive` is a
 third, independent code path that happens to share almost all of its extraction and database
 logic with the existing one — see "Reuse checklist" at the end.
 
+A comprehensive run also becomes the source of local `.csv` folders going forward, exported from
+`industrydb` right after the push commits (see "Local `.csv` output for country folders" below) —
+so the `trade_id` values a website page reads out of `year/{year}/{country}/{flow}/trade.csv` are,
+by construction, the exact same values a query against `industrydb` returns for that row, not a
+second, independently-computed numbering.
+
 ## Why today's approach doesn't scale to "every region"
 
 `trade.py` filters Exiobase's global inter-industry matrix (`Z`) down to one country's rows before
 writing `trade.csv`, then that file is committed to the `trade-data` repo, fetched back over
 `raw.githubusercontent.com` by `team`'s Rust backend (`fetch_github_csv`), and inserted with a
-per-country `trade_id` block (`country_block_index`, see `PLAN-merge.md` in `team`). That's the
-right shape for a stable 14-country list where each file is a few hundred KB and a human wants to
-browse/download country folders on the website. It's the wrong shape once every region is in
-scope:
+per-country `trade_id` block (`country_block_index`, see `PLAN-merge.md` in `team`). That
+mechanism — not the *existence* of local files, which comprehensive still produces by default —
+is the part that doesn't scale to 49 regions:
 
-- **File size / git.** 49 regions × 3 flow types worth of `trade.csv`/`trade_factor.csv` would add
-  many GB to a repo (`trade-data`) that's meant to stay downloadable from the website.
 - **The GitHub round-trip is unnecessary.** Committing a file just so a server can immediately
-  fetch it back over HTTP only makes sense when the file is also a first-class downloadable
-  product. Comprehensive rows aren't (see below); pushing them straight to Postgres skips two
-  network hops and disk writes.
+  fetch it back over HTTP only makes sense when the round-trip is the only way to get data into
+  Postgres. It isn't here (see "Database write path" below): pushing straight to Postgres and
+  *separately* writing the local file from the same in-memory/already-committed data skips two
+  network hops for the actual database load, whether or not a local folder also gets written.
 - **Per-country `trade_id` blocks aren't needed.** They exist so that adding country #15 to an
   *already-loaded* database can't collide with country #1's ids. Comprehensive builds the entire
   year in one shot, so a plain 1-based sequential id has no gaps and can't collide with itself —
   see "Trade ID scheme" below for why it also can't collide with anything already in `industrydb`.
 
-## `config.yaml`: add `comprehensive` as a third `COUNTRY.list` option
+Local file *volume* is a separate, genuine tradeoff, not eliminated by any of the above: 49
+regions' worth of `trade.csv`/`trade_factor.csv` is real disk/git footprint that the curated
+14-country list never had to carry. `comprehensive` defaults to accepting that footprint (see
+`COMPREHENSIVE.folders` below) because generating it costs nothing extra in *compute* — the
+region-chunk that would produce a local file is already sitting in memory for all 49 regions
+regardless of how many folders get written (see "Extraction" below) — but it's still real bytes on
+disk and, if committed, in `trade-data`'s git history. `COMPREHENSIVE.folders: default` exists
+specifically for whoever wants comprehensive's Azure coverage without that footprint.
+
+## `config.yaml`: add `comprehensive` as a third `COUNTRY.list` option, plus a folder-scope knob
 
 Today's `NOTES` section documents two `COUNTRY.list` values that `resolve_country_list()` in
 `main.py` special-cases: `default` (14 countries) and `all` (whatever country folders already
-exist on disk, i.e. the short curated list currently in `trade-data/year/{year}/`). Add a third:
+exist on disk, i.e. the short curated list currently in `trade-data/year/{year}/`). Add a third,
+plus a new, independent `COMPREHENSIVE.folders` setting controlling how many of the 49 pushed
+regions also get a local folder (default: all 49):
 
 ```yaml
 NOTES:
@@ -44,10 +61,22 @@ NOTES:
   2: COUNTRY.list "all" = run all (could take hours)
   3: COUNTRY.list "comprehensive" = push every Exiobase region (all 49 —
     see PLAN-comprehensive.md) directly to Azure industrydb for one year.
-    No local per-country .csv files, no per-country trade_id blocks. Set
-    TRADEFLOW to anything; comprehensive ignores it (imports/exports/
-    domestic all come out of one extraction — see PLAN-comprehensive.md).
+    No per-country trade_id blocks. Set TRADEFLOW to anything;
+    comprehensive ignores it (imports/exports/domestic all come out of one
+    extraction — see PLAN-comprehensive.md). Writes a local
+    year/[year]/[country]/ folder for every one of the 49 regions by
+    default — set COMPREHENSIVE.folders to "default" to only write
+    folders for the 14 default-list countries instead (every region is
+    still pushed to Azure either way; this only controls local .csv
+    output).
+COMPREHENSIVE:
+  folders: all   # "all" (default, all 49 regions get a local folder) | "default" (only the 14 default-list countries)
 ```
+
+`EXIOBASE_COMPREHENSIVE_FOLDERS` overrides `COMPREHENSIVE.folders` the same way
+`EXIOBASE_TRADEFLOW`/`EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST` already override their config.yaml
+counterparts in `config_loader.load_config()` — same pattern, one more `if
+os.environ.get(...)` block, no change to the override mechanism itself.
 
 `main.py` needs one new early branch, not a change to `resolve_country_list()` itself (that
 function's job — turning a country list into... a country list — doesn't fit "there is no country
@@ -57,8 +86,19 @@ list, run one job for the whole year"). In `process_tradeflow`'s caller (the per
 `run_comprehensive_processing(year)` instead. That function runs a new script
 (`trade_comprehensive.py`, see below) once per year via the same `subprocess.run(...,
 env={**os.environ, 'EXIOBASE_YEAR': str(year)})` pattern `run_country_processing` already uses —
-no `EXIOBASE_COUNTRY`/`EXIOBASE_TRADEFLOW` needed, since comprehensive has neither. `--interstate
-US` continues to work unchanged afterward (see "US/domestic continuity" below for why it can).
+no `EXIOBASE_COUNTRY`/`EXIOBASE_TRADEFLOW` needed, since comprehensive has neither, but it does
+pass through `EXIOBASE_COMPREHENSIVE_FOLDERS` if set. Once `trade_comprehensive.py` exits,
+`run_comprehensive_processing` also runs the new Azure-export step (see "Local `.csv` output for
+country folders" below) for whichever region list `COMPREHENSIVE.folders` resolved to (all 49 by
+default, or just the `default`-14), so `year/{year}/{country}/{domestic,imports,exports}/
+trade.csv` exist locally exactly as if `default`/`all` had been run for that region — `--interstate
+US` and the rest of `run_country_processing`'s script chain (`trade_impact.py`/`trade_resource.py`/
+`trade_competitiveness.py`) keep working unmodified against those files afterward. That downstream
+script chain itself stays scoped to the `default`-14 regardless of `COMPREHENSIVE.folders` — it's
+per-country economic/competitiveness analysis, not something this plan extends to the other 35 by
+default; a region outside `default` that gets a folder from `COMPREHENSIVE.folders: all` gets
+`trade.csv`/`trade_factor.csv` and a `runnote.md`, not `trade_impact.csv`/`export_competitiveness.csv`
+unless separately requested.
 
 ## Confirmed: Exiobase's regions have a fixed, discoverable order
 
@@ -168,6 +208,16 @@ when A had its turn. `flow_type` on each row can just be `'domestic'` (region1 =
 that distinction was only ever about *whose file* a row came from, and there's only one file now.
 `country` becomes `region1` (the exporter) for the same reason.
 
+**All 49 regions get pushed to `industrydb`; all 49 get a local folder too, by default.** The loop
+above runs for every region regardless — that's what makes the year "comprehensive" in
+`industrydb` — and since a region's own chunk (exports+domestic) is already sitting in memory the
+moment that region has its turn, writing it to `year/{year}/{country}/{domestic,exports}/trade.csv`
+costs nothing extra in compute for any of the 49, not just the curated 14 (see "Local `.csv`
+output for country folders" below for exactly what's written per region, and how `imports` — the
+one flow type that isn't free — gets added afterward). Set `COMPREHENSIVE.folders: default` in
+`config.yaml` to fall back to only the 14 `default`-list regions if the other 35 regions' disk/git
+footprint isn't wanted; `industrydb` gets all 49 either way.
+
 ## Memory management: stream by region, don't materialize the global matrix
 
 Measured directly against the already-downloaded `IOT_2021_pxp.zip` (49 regions × 200 sectors
@@ -259,37 +309,120 @@ a second tiny one) is also the natural place to call `ensure_merge_infra` + the 
 the previous section, as a preflight `trade_comprehensive.py` calls once before it starts
 streaming region chunks.
 
-## US/domestic local CSV continuity — derive it, don't recompute it
+## Local `.csv` output for country folders — memory for exports/domestic, Azure for imports
 
-`bea/main.py` reads a local `trade-data/year/{year}/US/domestic/trade.csv` and keys
-`interstate.trade_id` off that file's `trade_id` column directly (`interstate.trade_id` has a real
-FK to `trade(year, trade_id)` — see `team/src/main.rs`'s `interstate` table comment). The plan text
-asked whether the comprehensive run's `trade_id` for US-domestic rows could be *derived* via a
-formula from Exiobase's indexed region order. It could (US is region 28 of 49 in the fixed order
-above), but that would require knowing exactly how many rows every one of the 27 preceding
-regions' chunks produced *before* US's turn — which means running those chunks anyway. There's no
-shortcut that avoids computing the earlier chunks, so a derived formula would be strictly more
-fragile than the alternative for zero benefit:
+Three related questions this section answers: (1) can comprehensive produce local `.csv` folders
+at all, so a webpage reading `year/{year}/{country}/{flow}/trade.csv` sees `trade_id` values that
+line up with `industrydb`, (2) for how many of the 49 regions (all of them, by default — see
+`COMPREHENSIVE.folders` above), and (3) can a `[year]/[country]` folder be added *later*, for a
+region that wasn't given a folder the first time (e.g. `COMPREHENSIVE.folders: default` was used,
+or the region is genuinely new), with the same alignment?
 
-**Just slice it out of the in-memory chunk that already has the real `trade_id` values.** When
-`trade_comprehensive.py` processes the `US` region's chunk (region 28 in the loop), after
-assigning that chunk's `trade_id` range and pushing it to `industrydb`, filter that same in-memory
-`DataFrame` for `region1 == 'US' & region2 == 'US'` and write it to
-`trade-data/year/{year}/US/domestic/trade.csv` / `trade_factor.csv` in the exact format `trade.py`
-writes today (`get_file_path(config, 'industryflow')` / `'trade_factor'` with `EXIOBASE_COUNTRY=US`
-in the environment, same as always). Because it's the same objects, not a re-derivation, the
-`trade_id` values are guaranteed identical to what's already sitting in `industrydb` — `bea/
-main.py` and `run_interstate_step`'s `--interstate US` keep working completely unmodified. (`IN`/
-`india/main.py` has no `trade_id` dependency at all — grepped, confirmed — so no equivalent slice
-is needed there.)
+**Chosen design: a hybrid, split along the same "local to one chunk vs. not" line from
+"Extraction" above.** A region's own chunk (built when it has its turn as `from_region`) contains
+that region's **domestic** rows (`region1 == region2`) and **exports** rows (`region1 == region,
+region2 != region1`) in full — nothing else in the 49-region loop can add to either, so they're
+final the moment that region's chunk is computed. Its **imports** are not local — they're
+scattered across up to 48 *other* regions' chunks (B's imports from A live in chunk A, produced
+when A has its turn, not when B does) — so they can only be complete once the entire 49-region
+loop has finished. This split is exactly why "for how many regions" and "which mechanism" are
+independent questions: `COMPREHENSIVE.folders` only decides *which regions* below get a folder at
+all (all 49 by default, or just the `default`-14); every region that does get one still gets its
+exports/domestic from memory and its imports from Azure, the same way.
 
-## `.gitignore` — only relevant if a local staging file is ever used
+- **Exports + domestic, for every in-scope region (all 49 by default), sliced straight out of that
+  region's own in-memory chunk** at the point in the loop where that region has its turn — no
+  extra database round-trip, no waiting for the other 48 regions. Same for their `trade_factor`
+  rows, which are already computed per-chunk anyway (see "Memory management" above) using the
+  `factor_id` mapping already finalized by the reference-table preflight step, so no remap risk
+  here either. Written via the same `get_file_path(config, ...)` calls `trade.py` already uses,
+  with `EXIOBASE_COUNTRY=<region>` in the environment — same file, same format, same `trade_id`
+  values that were just pushed to `industrydb` for that chunk. Skipped entirely for a region
+  `COMPREHENSIVE.folders: default` excludes — that region's chunk still gets pushed to
+  `industrydb`, just never written to disk.
+- **Imports, for every in-scope region, pulled from `industrydb` once the full 49-region loop
+  finishes** — a plain `SELECT trade_id, region1, region2, industry1, industry2, amount FROM trade
+  WHERE year = :year AND region2 = :country AND region1 != :country`, joined against
+  `trade_factor` on the resulting `trade_id` set for `trade_factor.csv`. This is the only part of
+  country-folder generation that costs a real network round-trip, and it can only happen after
+  every region has had its turn (a country's imports may be contributed by any of the other 48).
+  With `COMPREHENSIVE.folders: all` this means 49 pull queries instead of 14 — each one a simple
+  indexed lookup, not a scan, so the added count is cheap relative to the loop itself.
 
-Design (A) above never needs a durable local CSV for anything except the US-domestic slice (which
-already belongs in `trade-data` and was never in question). If a future debugging pass wants an
-optional local dump of a comprehensive run for inspection, write it under `trade-data/year/{year}/
-comprehensive/` and add that path to `trade-data/.gitignore` (parallel to the existing `year/**/
-*-lg.*` entry) before it's ever produced — never commit a comprehensive-scale file.
+`trade_id` alignment is exact either way — the in-memory slice *is* what was pushed to
+`industrydb`, not a recomputation, and the Azure pull reads back `industrydb`'s own values — so
+`bea/main.py`, `india/main.py`, `trade_impact.py`, `trade_resource.py`, and
+`trade_competitiveness.py` all keep reading local files in the same shape they always have,
+unmodified. Column layout for both paths matches what `trade.py`/`create_trade_factor` already
+write (`trade_id, region1, region2, industry1, industry2, amount` and `trade_id, factor_id, level`
+— confirmed against `trade.py:export_to_csv` and the Rust CSV parsers in `insert_trade_rows`/
+`insert_trade_factor_rows`, which read those exact headers).
+
+**`runnote.md` records the Azure-pull duration**, written for every region that gets a folder (all
+49 by default). `create_runnote()` already writes a `**Duration:**` line per country/tradeflow
+from `run_country_processing`'s script-timing. Extend it (or the comprehensive-derived country
+folders' equivalent call) with a second line specific to this hybrid — e.g. `**Imports export
+(Azure):** {seconds:.1f}s` — timed around just the `SELECT` + write step for that region's
+`imports` folder. The exports/domestic slice needs no timing line of its own worth noting (it's a
+`DataFrame` filter on data already in memory, not a separate operation with its own cost); the
+interesting number here is specifically how long the one real network round-trip per region took,
+which varies with how many of the other 48 regions trade with it. Only the `default`-14 get the
+full `trade_impact.py`/`trade_resource.py`/`trade_competitiveness.py` subprocess chain afterward,
+exactly as `run_country_processing` does today (see previous section) — for those 14,
+`create_runnote`'s existing `success_count`/`total_scripts` bookkeeping only needs to account for
+those three scripts, not four, since `trade.py` itself was skipped (its output already exists).
+The other 35 (when `COMPREHENSIVE.folders: all`) get a `runnote.md` documenting just the
+`trade.csv`/`trade_factor.csv` derivation and its Azure-pull timing — no scripts ran for them, so
+that line is simply omitted rather than reported as `0/3`.
+
+One correctness detail that's easy to miss: **local `factor.csv` must also be exported from
+`industrydb`'s `factor` table, not generated locally by `factors.py`'s `create_factors_csv()`.**
+That function assigns `factor_id` by walking Exiobase's own extension/stressor order fresh every
+run, starting at 1 — fine in isolation, but `industrydb`'s `factor` table only agrees with that
+numbering for the *first* year ever merged into it. Every later year's `upsert_factor_rows_merged`
+remaps incoming `factor_id`s to match existing rows by `(extension, stressor)` (see
+`PLAN-merge.md`'s "factor table" section), so by the time 2018 runs, `industrydb.factor` already
+holds 728 rows from 2019/2021/2023 with IDs that don't line up with a fresh local 1-based count.
+Exporting `factor.csv` from `industrydb.factor` (`factor_id, unit, stressor, extension` — same
+four columns `create_factors_csv()` writes, different source) keeps `trade_factor.csv`'s
+`factor_id` values meaningful against the `factor.csv` shipped alongside it.
+
+**Answering "add a `[year]/[country]` folder later":** once a year has gone through comprehensive,
+every region's rows are already in `industrydb` regardless of `COMPREHENSIVE.folders` — that
+setting only ever controlled which regions got a *local file*, never which regions got pushed to
+Azure (that's always all 49). So "add a folder later" now almost always means "a region
+`COMPREHENSIVE.folders: default` excluded the first time," not "a region comprehensive never saw"
+— there's no such thing as the latter for a year that's already been through comprehensive. Either
+way the answer is the same: **always export from Azure, never re-run the Exiobase extraction, for
+any year already loaded.** Unlike the in-loop case above, there's no in-memory chunk left to slice
+from by then — the comprehensive run that built it is long finished — so a later request pulls
+**all three** flow types (`exports`/`domestic`/`imports`, not just `imports`) from `industrydb`
+with the same `SELECT` shape, using `region1 = :country AND region2 != :country` for exports and
+`region1 = region2 = :country` for domestic instead of the in-memory filter. Re-deriving from the
+raw Exiobase `.zip` (Exiobase's indexed region order, re-parsing, re-stacking) is strictly worse
+for this case — slower (re-downloads/re-parses a multi-GB file and re-runs the six-extension
+factor merge from scratch), and, if a future code change ever alters a threshold or aggregation
+rule, silently *riskier*: a locally-recomputed file could drift from what's actually stored in
+`industrydb` without either side erroring, whereas a straight export can't drift because it has no
+independent computation to drift from. Re-running the Exiobase extraction only remains relevant
+for a year that hasn't been comprehensively loaded into `industrydb` at all yet — an entirely
+different situation ("load a new year," covered by "Rollout" below) from "get an existing year's
+data into one more local folder."
+
+## `.gitignore` — worth deciding on before the first `COMPREHENSIVE.folders: all` run
+
+With all 49 regions writing local folders by default, `trade-data` gains real new volume every
+comprehensive year — not the "many GB" the full in-memory matrix would have been (that risk is
+fully handled by the per-region streaming design regardless of folder count), just the ordinary
+linear cost of ~3.5x today's 14-country footprint per year. Whether to commit all 49 regions'
+folders or only the `default`-14's is a `trade-data` git-history/repo-size decision for whoever
+maintains it, independent of this plan — `COMPREHENSIVE.folders: default` avoids generating the
+other 35 at all; `.gitignore`-ing a pattern like `year/*/[A-Z][A-Z]/` for the non-`default` codes
+is the alternative if the files should exist locally but never be committed. Separately, if a
+future debugging pass wants an optional local dump of a comprehensive run for inspection, write it
+under `trade-data/year/{year}/comprehensive/` and add that path to `trade-data/.gitignore`
+(parallel to the existing `year/**/*-lg.*` entry) before it's ever produced — never commit a
+comprehensive-scale file.
 
 ## Rollout: 2018
 
@@ -297,13 +430,24 @@ comprehensive/` and add that path to `trade-data/.gitignore` (parallel to the ex
    `exiobase_data/` yet, unlike 2019/2020/2021/2022/2023).
 2. Preflight: call the new reference-tables endpoint (creates/updates `factor`/`industry`/`sector`/
    `sector_industry`, runs `ensure_merge_infra`, seeds `region` with all 49 codes).
-3. Run `trade_comprehensive.py` for 2018 — loops all 49 regions, streams `trade`/`trade_factor`
-   chunks straight into `industrydb` (`year=2018`), writes the `US/domestic` slice locally.
-4. Verify: `SELECT count(*) FROM trade WHERE year=2018` has no gaps in `trade_id` (`max(trade_id) =
+3. Run `trade_comprehensive.py` for 2018 (`COMPREHENSIVE.folders` left at its default, `all`) —
+   loops all 49 regions, streams `trade`/`trade_factor` chunks straight into `industrydb`
+   (`year=2018`), and, for every one of the 49, slices that region's own chunk into
+   `year/2018/{country}/{domestic,exports}/trade.csv`+`trade_factor.csv` as it goes (no Azure
+   round-trip for these). Consider `COMPREHENSIVE.folders: default` for a first dry run against a
+   scratch `trade-data` checkout, to see the Azure-only 35 vs. local-49 split before committing to
+   the full footprint.
+4. Once all 49 regions are done, pull `imports` for all 49 from `industrydb`
+   (`year/2018/{country}/imports/trade.csv`+`trade_factor.csv`), timing each region's pull for its
+   `runnote.md` line. Export the shared `year/2018/factor.csv` from `industrydb.factor` (using the
+   `factor_map` the preflight step already returned) and copy the locally-produced
+   `industry.csv`/`sector.csv`/`sector_industry.csv` into place (never remapped, no Azure round
+   trip needed for those).
+5. Verify: `SELECT count(*) FROM trade WHERE year=2018` has no gaps in `trade_id` (`max(trade_id) =
    count(*)`), `region` has all 49 codes, `fk_trade_region`/`fk_trade_industry1`/`fk_trade_industry2`
-   have zero violations, and `US/domestic/trade.csv`'s `trade_id` values are a subset of
-   `industrydb`'s `WHERE year=2018 AND region1='US' AND region2='US'` rows.
-5. Run `bea/main.py` (`--interstate US`) against the 2018 local domestic CSV exactly as done for
+   have zero violations, and every region folder's three `trade_id` ranges (exports/domestic from
+   memory, imports from Azure) are disjoint and all present in `industrydb WHERE year=2018`.
+6. Run `bea/main.py` (`--interstate US`) against the 2018 `US/domestic` folder exactly as done for
    2019/2021/2023 today, confirm `interstate` rows insert with no FK violations against
    `trade(2018, *)`.
 
@@ -318,7 +462,11 @@ comprehensive/` and add that path to `trade-data/.gitignore` (parallel to the ex
 | `upsert_factor_rows_merged`/`upsert_industry_rows`/`upsert_sector_rows`/`upsert_sector_industry_rows` | `POST /api/db/comprehensive/push-reference-tables` (thin wrapper around the four `upsert_*` calls + `ensure_merge_infra` + region seed) |
 | `trade`/`trade_factor`'s existing `(year, trade_id)` PK and `trade_natural_key` UNIQUE constraint | Python-side direct `psycopg2` COPY-to-staging-then-`INSERT...ON CONFLICT` path for `trade`/`trade_factor` |
 | `EXIOBASE_HOST`/`NAME`/`USER`/`PASSWORD`/`PORT`/`SSL_MODE` env vars | region-loop chunking + running `trade_id` counter + categorical-dtype memory handling |
-| `get_file_path`/`config_loader.load_config` (for the US-domestic local slice) | `config.yaml`'s `comprehensive` `COUNTRY.list` value + `NOTES` entry |
+| `get_file_path`/`config_loader.load_config` (for writing local folders in the existing layout) | in-loop exports/domestic slice-and-write inside `trade_comprehensive.py`, per in-scope region (all 49 by default) |
+| `trade.py`/`create_trade_factor`'s exact CSV column layout (so derived files read identically to today's) | `export_country_imports.py` (or a function `trade_comprehensive.py` calls post-loop) — pulls just `imports` for every in-scope region once the 49-region loop finishes |
+| `create_runnote()` (extended with a second timing line, not replaced — see previous section) | `export_country_csvs.py` — pulls **all three** flow types from `industrydb`, for any later ad-hoc `[year]/[country]` folder request where no in-memory chunk exists any more |
+| `config_loader.load_config`'s existing env-override pattern (`EXIOBASE_TRADEFLOW` etc.) | `COMPREHENSIVE.folders` config.yaml key + `EXIOBASE_COMPREHENSIVE_FOLDERS` override — `all` (default, all 49 get folders) vs. `default` (just the 14) |
 | `trade_row_already_known` — **not reused**, not needed (see "Trade ID scheme") | |
 | `country_block_index`/`trade_id_base`/`get_or_assign_country_block` — **not reused**, not needed | |
 | `fetch_github_csv` / committing `trade.csv` to `trade-data` — **not used** for comprehensive rows | |
+| `factors.py`'s `create_factors_csv()` local numbering — **not reused** for exported `factor.csv` (must come from `industrydb.factor`, see previous section) | |
