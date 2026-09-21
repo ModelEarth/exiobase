@@ -128,17 +128,28 @@ each region pair is visited exactly once, as the exporter's turn), so the existi
 
 ## Extraction: one pass per region-as-exporter, not three passes per country
 
-`trade.py`'s `extract_m_matrix_data` already has the right shape for this — it's just filtered too
-narrowly. Its `exports` branch does:
+`trade.py`'s `extract_m_matrix_data` has the right *filtering conditions* for this, but the wrong
+*mechanism* to loop 49 times — reusing it as literally written would be a serious mistake, not
+just a stylistic one (see the measured numbers in "Memory management" below). Its `exports`
+branch does:
 
 ```python
+Z = exio_model.Z.copy()                                                   # full 9,800 x 9,800 matrix
+Z_stacked = Z.stack(level=['to_region', 'to_sector'], future_stack=True).reset_index()  # 96,040,000 rows
 Z_filtered = Z_stacked[Z_stacked['from_region'] == self.country].copy()
 Z_filtered = Z_filtered[Z_filtered['to_region'] != self.country].copy()   # <- excludes domestic
 ```
 
-Comprehensive's per-region chunk is the same query with that second line removed — "everything
-this region exports, **including to itself**" — and threshold logic that keeps domestic's lower
-bar:
+It stacks the **entire** matrix into long format first, and only *then* filters down to one
+region with a boolean mask. That's fine when it happens once per single-country run. Looping it
+49 times for comprehensive would redo that full 96M-row stack 49 times over — see below for why
+that's not acceptable.
+
+Comprehensive's per-region chunk keeps the same filtering *conditions* (drop the
+`to_region != self.country` exclusion, since domestic should stay in) but restructures the
+*mechanism*: slice `Z.loc[region]` — that region's own 200 rows × 9,800 columns — **before**
+calling `.stack()`, so only that region's ~2M-row slice is ever materialized, never the full 96M-row
+one. Same filtering logic, applied to a 49x-smaller starting frame:
 
 ```python
 keep = (
@@ -159,27 +170,43 @@ that distinction was only ever about *whose file* a row came from, and there's o
 
 ## Memory management: stream by region, don't materialize the global matrix
 
-`Z.stack(...)` on the *entire* 49-region × ~200-sector matrix produces roughly 9,800² ≈ 96M rows
-before any filtering — too much to hold as an intermediate `DataFrame` with string columns for a
-whole-year run. The fix is to never build that frame:
+Measured directly against the already-downloaded `IOT_2021_pxp.zip` (49 regions × 200 sectors
+confirmed by counting `unit.txt`, so 9,800 × 9,800 = 96,040,000 possible `(from, to)` combinations)
+to ground this in real numbers rather than estimates:
 
-1. **Chunk by `from_region`.** Slice `Z.loc[region]` (one region's ~200 rows × 9,800 columns, same
-   size the current per-country code already handles today) and `.stack()` only that slice — 49
-   chunks of ~2M raw rows each instead of one 96M-row frame. This is a straightforward loop around
-   the existing per-country extraction code, not a rewrite of it.
+| | Full-matrix stack (`Z.stack()` on the whole matrix, then filter — what `extract_m_matrix_data` does today) | Per-region slice, stacked (`Z.loc[region]` **before** `.stack()`) |
+|---|---|---|
+| Rows produced | 96,040,000 | 1,960,000 |
+| Deep memory (object dtype, as `.stack()` naturally produces) | ~29.8 GB | ~492 MB |
+| After casting to `category` dtype | — | ~25.5 MB |
+| Wall time | 5.7s | 0.3s |
+| Process peak RSS | ~10.1 GB (up from a ~4.3 GB baseline — parsing the model itself, with every satellite extension, already costs that much) | ~4.4 GB (barely above the same baseline) |
+
+Today's single-country code pays the left column's cost *once per run* and evidently survives it
+(every country/flow-type/year combination loaded so far has finished successfully). Comprehensive
+cannot pay that cost 49 times — looping `extract_m_matrix_data` as literally written would replay
+a ~10GB-RSS, ~30GB-logical-size operation on every single region, reprocessing 4.7 billion
+row-instances in total instead of 96 million. The right column is the actual design for this plan:
+
+1. **Chunk by `from_region`, sliced *before* stacking.** `Z.loc[region]` — that region's own
+   200 rows × 9,800 columns — stacked on its own, not filtered out of an already-stacked whole
+   matrix. This is the one non-negotiable change from `extract_m_matrix_data`'s current mechanism;
+   everything else in this section is a smaller refinement on top of it.
 2. **Filter before mapping/grouping**, same order `trade.py` already uses — apply the amount
    threshold on the raw stacked chunk first, *then* map sector names to `industry_id` and
-   `groupby`. Shrinks each chunk before the more expensive steps.
-3. **Categorical dtype** for `from_region`/`to_region`/sector columns immediately after `.stack()`
-   — cheap 4-byte codes instead of repeated Exiobase sector-name strings across ~2M rows per
-   chunk.
+   `groupby`. Shrinks each chunk further before the more expensive steps.
+3. **Categorical dtype** for `from_sector`/`to_region`/`to_sector` immediately after `.stack()`
+   — per the table above, this is a ~19x reduction on top of the slicing (492MB → 25.5MB per
+   chunk) for a single `astype('category')` call per column.
 4. **Running `trade_id` counter carried across chunks**, not reset per region: chunk *n*'s first
    `trade_id` is `1 + (sum of rows written by chunks 1..n-1)`.
 5. **`trade_factor` computation also happens per chunk**, immediately after that chunk's `trade`
    rows are finalized, using the *existing* `create_trade_factor`/`_aggregate_factors` logic in
    `trade.py` (already internally chunked at 10,000 rows for the `M`-matrix merge — reused
-   unmodified) — then both are pushed to Postgres and the chunk is freed before the next region
-   starts. Peak memory stays bounded to "one region's worth of data," not "the whole year's."
+   unmodified, and operating on the chunk's already-aggregated, already-small `trade_df`, not the
+   raw stacked frame) — then both are pushed to Postgres and the chunk is freed before the next
+   region starts. Peak memory stays at roughly the ~4.3GB parse-time baseline throughout the whole
+   49-region loop, not 49 sequential ~10GB spikes.
 
 Recommend pulling `create_trade_factor`, `_aggregate_factors`, and the sector-mapping/threshold
 helpers out of `trade.py`'s `ExiobaseTradeFlow` class into a small shared module (e.g.
