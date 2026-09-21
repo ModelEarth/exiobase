@@ -443,19 +443,3 @@ def write_comprehensive_runnote(config, year, region, kind, source, seconds=None
         "(trade_impact.py/trade_resource.py/trade_competitiveness.py) ran for this folder.",
     ]
     (folder / "runnote.md").write_text("\n".join(lines) + "\n")
-
-
-def write_timing_sidecar(config, region, seconds):
-    """
-    Drops `.comprehensive_timing.json` next to a default-14 region's
-    imports/ folder, recording the Azure pull duration for main.py's
-    run_comprehensive_processing to fold into that country's real
-    runnote.md once the downstream analysis chain finishes (create_runnote()
-    would otherwise overwrite anything written here directly).
-    """
-    import json
-    config = dict(config)
-    config['COUNTRY'] = {'current': region}
-    folder = Path(get_output_folder(config, 'imports'))
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / '.comprehensive_timing.json').write_text(json.dumps({'azure_pull_seconds': seconds}))

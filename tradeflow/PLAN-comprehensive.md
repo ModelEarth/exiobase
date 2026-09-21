@@ -163,10 +163,12 @@ COMPREHENSIVE:
 `COMPREHENSIVE.target` the same way `EXIOBASE_TRADEFLOW`/`EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`
 already override their config.yaml counterparts in `config_loader.load_config()` — same pattern,
 one more `if os.environ.get(...)` block each, no change to the override mechanism itself.
-`EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`/`EXIOBASE_COMPREHENSIVE_TARGET` each also accept a short
-bare-name alias — `YEAR`/`COUNTRY_LIST`/`DB_TARGET` — for a shorter comprehensive-mode command line
-(`YEAR=2018 COUNTRY_LIST=comprehensive DB_TARGET=industrydb python main.py`); the `EXIOBASE_`-prefixed
-name wins if both are set, so the short form is a convenience, not a second source of truth.
+`EXIOBASE_YEAR`/`EXIOBASE_COUNTRY_LIST`/`EXIOBASE_COMPREHENSIVE_TARGET`/`EXIOBASE_COMPREHENSIVE_FOLDERS`
+each also accept a short bare-name alias — `YEAR`/`COUNTRY_LIST`/`DB_TARGET`/`SCOPE` — for a shorter
+comprehensive-mode command line (`YEAR=2024 COUNTRY_LIST=comprehensive DB_TARGET=industrydb
+SCOPE=default python main.py`); the `EXIOBASE_`-prefixed name wins if both are set, so the short
+form is a convenience, not a second source of truth. `SCOPE`, not `FOLDERS`, since
+`COMPREHENSIVE.folders` now also limits the Azure push, not just local `.csv` output.
 
 `DB_TARGET` (optional — omitting it defaults every year to `year_db`) also accepts a
 comma-separated list when `YEAR` is itself a comma-separated multi-year list: either one value
@@ -477,62 +479,69 @@ line up with `industrydb`, (2) for how many of the 49 regions (all of them, by d
 region that wasn't given a folder the first time (e.g. `COMPREHENSIVE.folders: default` was used,
 or the region is genuinely new), with the same alignment?
 
-**Chosen design: a hybrid, split along the same "local to one chunk vs. not" line from
-"Extraction" above.** A region's own chunk (built when it has its turn as `from_region`) contains
-that region's **domestic** rows (`region1 == region2`) and **exports** rows (`region1 == region,
-region2 != region1`) in full — nothing else in the 49-region loop can add to either, so they're
-final the moment that region's chunk is computed. Its **imports** are not local — they're
-scattered across up to 48 *other* regions' chunks (B's imports from A live in chunk A, produced
-when A has its turn, not when B does) — so they can only be complete once the entire 49-region
-loop has finished. This split is exactly why "for how many regions" and "which mechanism" are
-independent questions: `COMPREHENSIVE.folders` only decides *which regions* below get a folder at
-all (all 49 by default, or just the `default`-14); every region that does get one still gets its
-exports/domestic from memory and its imports from Azure, the same way.
+**Chosen design (revised for the 2024 run — see below for why the original Azure-pull design was
+replaced): everything comes from this run's own in-memory extraction, nothing is read back from
+Azure.** A region's own chunk (built when it has its turn as `from_region`) contains that region's
+**domestic** rows (`region1 == region2`) and **exports** rows (`region1 == region, region2 !=
+region1`) in full — nothing else in the 49-region loop can add to either, so they're final the
+moment that region's chunk is computed. That same chunk also contains every *other* in-scope
+country's **imports** from this region (its rows where `region2` is one of `folder_regions` and
+`region2 != region`) — so instead of waiting for the full loop to finish and pulling them back from
+`industrydb`, `capture_imports_for_others()` (`trade_comprehensive.py`) slices them out right there,
+appending to a per-country accumulator that gets written out once the loop ends.
 
-- **Exports + domestic, for every in-scope region (all 49 by default), sliced straight out of that
-  region's own in-memory chunk** at the point in the loop where that region has its turn — no
-  extra database round-trip, no waiting for the other 48 regions. Same for their `trade_factor`
-  rows, which are already computed per-chunk anyway (see "Memory management" above) using the
-  `factor_id` mapping already finalized by the reference-table preflight step, so no remap risk
-  here either. Written via the same `get_file_path(config, ...)` calls `trade.py` already uses,
-  with `EXIOBASE_COUNTRY=<region>` in the environment — same file, same format, same `trade_id`
-  values that were just pushed to `industrydb` for that chunk. Skipped entirely for a region
-  `COMPREHENSIVE.folders: default` excludes — that region's chunk still gets pushed to
-  `industrydb`, just never written to disk.
-- **Imports, for every in-scope region, pulled from `industrydb` once the full 49-region loop
-  finishes** — a plain `SELECT trade_id, region1, region2, industry1, industry2, amount FROM trade
-  WHERE year = :year AND region2 = :country AND region1 != :country`, joined against
-  `trade_factor` on the resulting `trade_id` set for `trade_factor.csv`. This is the only part of
-  country-folder generation that costs a real network round-trip, and it can only happen after
-  every region has had its turn (a country's imports may be contributed by any of the other 48).
-  With `COMPREHENSIVE.folders: all` this means 49 pull queries instead of 14 — each one a simple
-  indexed lookup, not a scan, so the added count is cheap relative to the loop itself.
+- **Exports + domestic, for every in-scope region, sliced straight out of that region's own
+  in-memory chunk** at the point in the loop where that region has its turn — no database
+  round-trip. Same for their `trade_factor` rows, already computed per-chunk anyway (see "Memory
+  management" above) using the `factor_id` mapping already finalized by the reference-table
+  preflight step, so no remap risk here either. Written via the same `get_file_path(config, ...)`
+  calls `trade.py` already uses, with `EXIOBASE_COUNTRY=<region>` in the environment — same file,
+  same format, same `trade_id` values that were just pushed to `industrydb` for that chunk. Skipped
+  entirely for a region `COMPREHENSIVE.folders: default` excludes — see "Trade ID scheme" above for
+  what still happens to that region's `trade_id` range.
+- **Imports, for every in-scope region, assembled from every one of the 49 regions' chunks as the
+  loop visits them** — `capture_imports_for_others()` filters each region's chunk (whether or not
+  that region itself is in scope) for rows destined for an in-scope country, computes
+  `trade_factor` for just that filtered subset (or reuses the whole-chunk result already computed,
+  for an in-scope exporter that needed it anyway for its own push), and appends to that country's
+  accumulator. Once the 49-region loop finishes, each in-scope country's accumulated rows are
+  concatenated and written out — no network round-trip at all, and correct regardless of
+  `COMPREHENSIVE.folders`: an out-of-scope exporter's flows to an in-scope importer are still
+  captured even though that exporter's own domestic/exports never reach Azure or disk anywhere
+  else.
 
-`trade_id` alignment is exact either way — the in-memory slice *is* what was pushed to
-`industrydb`, not a recomputation, and the Azure pull reads back `industrydb`'s own values — so
-`bea/main.py`, `india/main.py`, `trade_impact.py`, `trade_resource.py`, and
-`trade_competitiveness.py` all keep reading local files in the same shape they always have,
-unmodified. Column layout for both paths matches what `trade.py`/`create_trade_factor` already
-write (`trade_id, region1, region2, industry1, industry2, amount` and `trade_id, factor_id, level`
-— confirmed against `trade.py:export_to_csv` and the Rust CSV parsers in `insert_trade_rows`/
-`insert_trade_factor_rows`, which read those exact headers).
+**Why this replaced the original pull-from-`industrydb` design.** The original version left
+exports/domestic as an in-memory slice but pulled imports back from `industrydb` after the full
+loop finished (`SELECT ... FROM trade WHERE region2 = :country`), reasoning that a country's
+imports may be contributed by any of the other 48 regions, so they can only be complete once every
+region has had its turn. That's still true, but the original design assumed `industrydb` would
+always hold all 49 regions' rows to pull from — true only when `COMPREHENSIVE.folders: all`
+(2018's setting). Once `COMPREHENSIVE.folders: default` also started limiting the Azure push itself
+(the 2024 change — see "Trade ID scheme" above), a pull-based imports step would only ever see the
+default-14's own inter-trade, silently missing every flow from the 35 regions that were never
+pushed. In-memory capture during the same single pass fixes this for both settings at once, and is
+strictly cheaper than the round-trip it replaces, so it's now the only mechanism — there's no
+Azure-pull code path left to choose between.
 
-**`runnote.md` records the Azure-pull duration**, written for every region that gets a folder (all
-49 by default). `create_runnote()` already writes a `**Duration:**` line per country/tradeflow
-from `run_country_processing`'s script-timing. Extend it (or the comprehensive-derived country
-folders' equivalent call) with a second line specific to this hybrid — e.g. `**Imports export
-(Azure):** {seconds:.1f}s` — timed around just the `SELECT` + write step for that region's
-`imports` folder. The exports/domestic slice needs no timing line of its own worth noting (it's a
-`DataFrame` filter on data already in memory, not a separate operation with its own cost); the
-interesting number here is specifically how long the one real network round-trip per region took,
-which varies with how many of the other 48 regions trade with it. Only the `default`-14 get the
-full `trade_impact.py`/`trade_resource.py`/`trade_competitiveness.py` subprocess chain afterward,
-exactly as `run_country_processing` does today (see previous section) — for those 14,
-`create_runnote`'s existing `success_count`/`total_scripts` bookkeeping only needs to account for
-those three scripts, not four, since `trade.py` itself was skipped (its output already exists).
-The other 35 (when `COMPREHENSIVE.folders: all`) get a `runnote.md` documenting just the
-`trade.csv`/`trade_factor.csv` derivation and its Azure-pull timing — no scripts ran for them, so
-that line is simply omitted rather than reported as `0/3`.
+`trade_id` alignment is exact — every captured imports row keeps the same `trade_id` it was
+assigned as part of its *exporting* region's own chunk (see "Trade ID scheme" above), so an
+importer's `imports.csv` ends up with ids scattered across the full 49-region range, grouped by
+whichever region happened to export each row, not sequential or grouped by the importer itself —
+exactly Exiobase's own row order, just reassembled by destination instead of by source. `bea/
+main.py`, `india/main.py`, `trade_impact.py`, `trade_resource.py`, and `trade_competitiveness.py`
+all keep reading local files in the same shape they always have, unmodified. Column layout matches
+what `trade.py`/`create_trade_factor` already write (`trade_id, region1, region2, industry1,
+industry2, amount` and `trade_id, factor_id, level` — confirmed against `trade.py:export_to_csv`
+and the Rust CSV parsers in `insert_trade_rows`/`insert_trade_factor_rows`, which read those exact
+headers).
+
+Only the `default`-14 get the full `trade_impact.py`/`trade_resource.py`/`trade_competitiveness.py`
+subprocess chain afterward, exactly as `run_country_processing` does today (see previous section) —
+for those 14, `create_runnote`'s existing `success_count`/`total_scripts` bookkeeping only needs to
+account for those three scripts, not four, since `trade.py` itself was skipped (its output already
+exists). The other 35 (when `COMPREHENSIVE.folders: all`) get a `runnote.md` documenting just the
+in-memory `trade.csv`/`trade_factor.csv` derivation — no scripts ran for them, so that line is
+simply omitted rather than reported as `0/3`.
 
 One correctness detail that's easy to miss: **local `factor.csv` must also be exported from
 `industrydb`'s `factor` table, not generated locally by `factors.py`'s `create_factors_csv()`.**

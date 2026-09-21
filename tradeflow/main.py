@@ -21,7 +21,6 @@ processing starts, so a missing key/directory fails immediately rather
 than after a long run.
 """
 
-import json
 import subprocess
 import sys
 import time
@@ -394,32 +393,18 @@ def run_comprehensive_processing(year):
     config = load_config()
     downstream_scripts = ['trade_impact.py', 'trade_resource.py', 'trade_competitiveness.py']
 
-    def imports_timing_lines(country):
-        """trade_comprehensive.py drops a small sidecar next to a region's
-        imports/ folder recording how long that region's Azure pull took
-        (see PLAN-comprehensive.md's "Local .csv output for country
-        folders" section) -- surface it in this country's runnote.md
-        instead of losing it once create_runnote() overwrites whatever
-        trade_comprehensive.py wrote there."""
-        timing_path = Path(config['FOLDERS']['imports'].format(year=year, country=country)) / '.comprehensive_timing.json'
-        if not timing_path.exists():
-            return None
-        try:
-            seconds = json.loads(timing_path.read_text()).get('azure_pull_seconds')
-        except Exception:
-            return None
-        return [f"**Imports export (Azure):** {seconds:.1f}s"] if seconds is not None else None
-
     # Same per-tradeflow batch loop 'default'/'all' already use
-    # (process_tradeflow) -- just with the trade.py-less script list and the
-    # Azure-pull timing hook, instead of a second, near-duplicate loop here.
+    # (process_tradeflow) -- just with the trade.py-less script list, since
+    # trade_comprehensive.py already produced every flow type's CSVs
+    # (imports assembled in-memory during its region loop, not pulled from
+    # Azure -- see PLAN-comprehensive.md's "Local .csv output for country
+    # folders").
     for tradeflow in ['domestic', 'imports', 'exports']:
         all_countries = get_default_countries()
         countries, completed_countries = filter_incomplete_countries(all_countries, tradeflow, year)
         process_tradeflow(
             config, tradeflow, all_countries, countries, completed_countries,
             scripts=downstream_scripts,
-            extra_runnote_lines_fn=imports_timing_lines if tradeflow == 'imports' else None,
         )
 
 def main():
