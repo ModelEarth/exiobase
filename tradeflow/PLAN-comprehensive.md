@@ -18,6 +18,46 @@ so the `trade_id` values a website page reads out of `year/{year}/{country}/{flo
 by construction, the exact same values a query against `industrydb` returns for that row, not a
 second, independently-computed numbering.
 
+## Implementation status
+
+Everything in this plan is now built:
+
+- `config.yaml` — `comprehensive` `COUNTRY.list` value + `COMPREHENSIVE.folders` (default `all`);
+  `config_loader.py` — `EXIOBASE_COMPREHENSIVE_FOLDERS` override + `get_comprehensive_folders_scope()`.
+- `trade_extraction.py` — the shared module: `EXIOBASE_REGIONS` (49-region canonical order,
+  verified against `unit.txt`), `extract_region_chunk` (slice-before-stack), `aggregate_factors`/
+  `build_factor_mapping`/`compute_trade_factor` (pulled out of `trade.py`, which now delegates to
+  them — confirmed unchanged single-country behavior via a live extraction run against the
+  already-downloaded 2021 data), and `ensure_industry_mapping`/`ensure_sector_tables`/
+  `ensure_factors_export`.
+- `industrydb.py` — direct `psycopg2` connection, `push_trade_rows`/`push_trade_factor_rows`
+  (COPY-to-staging-then-`INSERT...ON CONFLICT`), `pull_trade_rows`/`pull_trade_factor_rows`/
+  `pull_factor_reference` (the Azure-export side of "Local `.csv` output"), and
+  `push_reference_tables` (calls the new Rust endpoint).
+- `trade_comprehensive.py` — the region-loop driver: streams all 49 regions to `industrydb`,
+  slices exports/domestic locally per in-scope region during the loop, pulls imports from
+  `industrydb` after the loop, writes the non-default regions' own `runnote.md` and the
+  default-14's `.comprehensive_timing.json` sidecar.
+- `export_country_csvs.py` — the ad-hoc "add a folder later" exporter (all three flow types,
+  straight from `industrydb`).
+- `team/src/merge_years.rs` — `POST /api/db/comprehensive/push-reference-tables` (schema
+  preflight + region seed + the four reference-table upserts + `factor_id_map` in the response),
+  routed in `main.rs`. Builds clean (`cargo build`, no new warnings).
+- `main.py` — `get_country_list_value()`, `run_comprehensive_processing()`, `run_country_processing`
+  now takes an optional trimmed `scripts` list (skips `trade.py` for the post-comprehensive
+  default-14 pass) and `extra_runnote_lines`, `create_runnote()` takes `extra_lines`.
+
+**Verified so far:** the full region-loop → `trade_id` offsetting → local-folder-derivation →
+Azure-imports-pull pipeline was run end-to-end against real, already-downloaded 2021 Exiobase data
+with `industrydb` mocked out (a real Postgres round trip needs live `EXIOBASE_*` credentials this
+environment doesn't have) — confirmed globally sequential `trade_id`s with zero gaps across
+regions, correct `default`-14-vs-other-35 folder/runnote/sidecar branching under both
+`COMPREHENSIVE.folders` settings, and `export_country_csvs.py`'s three-flow-type export shape.
+**Not yet done:** an actual live run against `industrydb` (needs real `EXIOBASE_*` credentials and
+writes real production rows — a deliberate, confirmable step, not something to run silently) and
+downloading the 2018 Exiobase file itself (not present in `exiobase_data/` yet). See "Rollout: 2018"
+below for that sequence.
+
 ## Why today's approach doesn't scale to "every region"
 
 `trade.py` filters Exiobase's global inter-industry matrix (`Z`) down to one country's rows before
@@ -107,17 +147,15 @@ order" — yes. Read directly from `unit.txt` inside `exiobase_data/IOT_2021_pxp
 order of the `region` column, which matches `Z.txt`'s column order):
 
 ```
-1  AT   11 FR   21 PL   31 CA   41 TR
-2  BE   12 GR   22 PT   32 KR   42 TW
-3  BG   13 HR   23 RO   33 BR   43 NO
-4  CY   14 HU   24 SE   34 IN   44 ID
-5  CZ   15 IE   25 SI   35 MX   45 ZA
-6  DE   16 IT   26 SK   36 RU   46 WA
-7  DK   17 LT   27 GB   37 AU   47 WL
-8  EE   18 LU   28 US   38 CH   48 WE
-9  ES   19 LV   29 JP   39 TR*  49 WF
-10 FI   20 MT   30 CN   40 TW*         (44 country rows + 5 RoW: WA/WL/WE/WF/WM)
+1  AT   8  EE   15 IE   22 PL   29 US   36 MX   43 ID
+2  BE   9  ES   16 IT   23 PT   30 JP   37 RU   44 ZA
+3  BG   10 FI   17 LT   24 RO   31 CN   38 AU   45 WA
+4  CY   11 FR   18 LU   25 SE   32 CA   39 CH   46 WL
+5  CZ   12 GR   19 LV   26 SI   33 KR   40 TR   47 WE
+6  DE   13 HR   20 MT   27 SK   34 BR   41 TW   48 WF
+7  DK   14 HU   21 NL   28 GB   35 IN   42 NO   49 WM
 ```
+(44 country rows + 5 RoW aggregates: WA/WL/WE/WF/WM, last)
 
 (exact list: `AT BE BG CY CZ DE DK EE ES FI FR GR HR HU IE IT LT LU LV MT NL PL PT RO SE SI SK GB
 US JP CN CA KR BR IN MX RU AU CH TR TW NO ID ZA WA WL WE WF WM` — 49 total, EU-27 first, then
@@ -125,9 +163,22 @@ non-EU OECD-ish countries, then the 5 Rest-of-World aggregates last). This is st
 least the 2019–2023 files already downloaded (spot-checked 2021; pymrio's `parse_exiobase3` always
 yields this same column order per Exiobase's own file format, not something the loader controls).
 
-**This order is not used for `trade_id` assignment** (see next section for why a derived formula
-is the wrong tool here) but it is used to pre-seed the `region` table (below), and it's useful
-context for anyone reading a `region1`/`region2` value that isn't in the curated 14.
+**This order is not used to *derive* `trade_id` across regions** (see next section for why a
+formula predicting US's block from this list is the wrong tool for that) but it is used to
+pre-seed the `region` table (below), and it's useful context for anyone reading a
+`region1`/`region2` value that isn't in the curated 14. It's also, since a later revision of this
+plan, the basis for `trade_id` order *within* one region's own rows too — see
+`extract_region_chunk`'s ordering step in `trade_extraction.py` and README.md's "Exiobase trade
+record order" note. That took two attempts to get right: `.stack(future_stack=True)` turned out to
+unconditionally re-sort its output alphabetically (no way to opt out), and even after switching to
+a numpy-based reshape that preserves file order, a naive "first row to survive the amount
+threshold" order turned out to reflect which regions/industries happen to trade early in the
+sector list that particular year, not Exiobase's fixed column position (confirmed against real
+2021 data: Malta's very first raw sector has zero measured flow to Austria specifically, but not
+to Italy, which would make Austria look like it comes "after" Italy under a survival-based order).
+The fix computes each row's position from pure structural facts — region's fixed list position,
+industry's fixed sector position — entirely decoupled from which cells happen to clear that year's
+threshold.
 
 ## `region` table: pre-seed the full 49, decouple from `block_index`
 

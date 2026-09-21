@@ -21,6 +21,7 @@ processing starts, so a missing key/directory fails immediately rather
 than after a long run.
 """
 
+import json
 import subprocess
 import sys
 import time
@@ -74,15 +75,18 @@ def resolve_year_list(config):
         return [int(y.strip()) for y in year_config.split(',')]
     return [int(year_config)]
 
+def get_country_list_value(config):
+    """Raw COUNTRY.list string ('all'/'default'/'comprehensive'/explicit), regardless of
+    whether config['COUNTRY'] is a dict ({'list': ..., 'current': ...}) or a plain string."""
+    country_config = config['COUNTRY']
+    if isinstance(country_config, dict):
+        return country_config.get('list', '')
+    return str(country_config)
+
+
 def resolve_country_list(config):
     """Resolve country list based on 'all', 'default', or explicit list"""
-    country_config = config['COUNTRY']
-    
-    if isinstance(country_config, dict):
-        country_list = country_config.get('list', '')
-    else:
-        country_list = str(country_config)
-    
+    country_list = get_country_list_value(config)
     year = config['YEAR']
     
     if country_list.lower() == 'all':
@@ -148,8 +152,17 @@ def filter_incomplete_countries(countries, tradeflow, year):
     
     return incomplete, completed
 
-def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=18000, country_timeout=3600):
-    """Run complete processing for a single country with timing and batch timeout check"""
+def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=18000, country_timeout=3600, scripts=None, extra_runnote_lines=None):
+    """Run complete processing for a single country with timing and batch timeout check.
+
+    `scripts` defaults to the full 4-script pipeline; comprehensive mode's
+    default-list downstream pass (see run_comprehensive_processing) passes a
+    trimmed list that skips trade.py, since trade_comprehensive.py already
+    produced that country's trade.csv/trade_factor.csv -- see
+    PLAN-comprehensive.md's "config.yaml" section. `extra_runnote_lines`
+    passes through to create_runnote (e.g. the Azure imports-pull duration
+    for that same comprehensive path).
+    """
     # Check if batch timeout exceeded before starting country
     elapsed_batch_time = time.time() - batch_start_time
     if elapsed_batch_time >= batch_timeout:
@@ -159,16 +172,17 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     print(f"\n{'='*80}")
     print(f"[HOME] STARTING {year} {country} {tradeflow.upper()} PROCESSING")
     print(f"{'='*80}")
-    
+
     start_time = time.time()
 
-    scripts = [
-        'trade.py',
-        'trade_impact.py',
-        'trade_resource.py',
-        'trade_competitiveness.py',
-    ]
-    
+    if scripts is None:
+        scripts = [
+            'trade.py',
+            'trade_impact.py',
+            'trade_resource.py',
+            'trade_competitiveness.py',
+        ]
+
     success_count = 0
     for i, script in enumerate(scripts, 1):
         # Check both batch and country timeouts before each script
@@ -245,7 +259,7 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
         print(f"[FOLDER] Generated: trade_factor.csv + trade_factor_lg.csv (721 factors)")
         
         # Create runnote.md for successful completion
-        create_runnote(country, tradeflow, start_time, total_time, success_count, len(scripts))
+        create_runnote(country, tradeflow, start_time, total_time, success_count, len(scripts), extra_lines=extra_runnote_lines)
     else:
         print(f"[WARN]  {country} {tradeflow} processing PARTIALLY COMPLETED ({success_count}/{len(scripts)} scripts)")
         if total_time >= country_timeout * 0.9:
@@ -323,6 +337,73 @@ def run_interstate_step(year, interstate_countries):
         else:
             print(f"[ERROR] {script} failed for {year} (exit code {result.returncode})")
 
+def run_comprehensive_processing(year):
+    """
+    COUNTRY.list "comprehensive": extracts every Exiobase region (all 49) in
+    one pass and pushes trade/trade_factor straight into industrydb, then
+    writes local .csv folders for whichever regions COMPREHENSIVE.folders
+    selects (all 49 by default, or just the default-14 -- see config.yaml's
+    NOTES and PLAN-comprehensive.md). Runs in place of the normal
+    resolve_country_list/process_tradeflow loop for this year -- comprehensive
+    ignores TRADEFLOW and any explicit COUNTRY.list value.
+
+    trade_comprehensive.py does the extraction/DB-push/local-derivation
+    itself (one subprocess call, like trade.py's per-country invocation).
+    Afterward, the default-14's downstream analysis chain
+    (trade_impact.py/trade_resource.py/trade_competitiveness.py) still runs
+    per country/tradeflow via run_country_processing, exactly as it would
+    under 'default'/'all' -- only trade.py itself is skipped, since
+    trade_comprehensive.py already produced that output.
+    """
+    print(f"\n{'#'*100}")
+    print(f"[COMPREHENSIVE] STARTING {year} COMPREHENSIVE PROCESSING (all 49 Exiobase regions)")
+    print(f"{'#'*100}")
+
+    result = subprocess.run(
+        [sys.executable, 'trade_comprehensive.py'],
+        cwd=Path(__file__).parent,
+        env={**os.environ, 'EXIOBASE_YEAR': str(year)},
+    )
+    if result.returncode != 0:
+        print(f"[ERROR] trade_comprehensive.py failed for {year} (exit code {result.returncode})")
+        return
+
+    print(f"\n{'#'*100}")
+    print(f"[COMPREHENSIVE] COMPLETED {year} COMPREHENSIVE PROCESSING")
+    print(f"{'#'*100}")
+    print(f"[COMPREHENSIVE] Running default-list analysis chain (trade_impact/trade_resource/trade_competitiveness)...")
+
+    config = load_config()
+    downstream_scripts = ['trade_impact.py', 'trade_resource.py', 'trade_competitiveness.py']
+
+    def imports_timing_lines(country):
+        """trade_comprehensive.py drops a small sidecar next to a region's
+        imports/ folder recording how long that region's Azure pull took
+        (see PLAN-comprehensive.md's "Local .csv output for country
+        folders" section) -- surface it in this country's runnote.md
+        instead of losing it once create_runnote() overwrites whatever
+        trade_comprehensive.py wrote there."""
+        timing_path = Path(config['FOLDERS']['imports'].format(year=year, country=country)) / '.comprehensive_timing.json'
+        if not timing_path.exists():
+            return None
+        try:
+            seconds = json.loads(timing_path.read_text()).get('azure_pull_seconds')
+        except Exception:
+            return None
+        return [f"**Imports export (Azure):** {seconds:.1f}s"] if seconds is not None else None
+
+    # Same per-tradeflow batch loop 'default'/'all' already use
+    # (process_tradeflow) -- just with the trade.py-less script list and the
+    # Azure-pull timing hook, instead of a second, near-duplicate loop here.
+    for tradeflow in ['domestic', 'imports', 'exports']:
+        all_countries = get_default_countries()
+        countries, completed_countries = filter_incomplete_countries(all_countries, tradeflow, year)
+        process_tradeflow(
+            config, tradeflow, all_countries, countries, completed_countries,
+            scripts=downstream_scripts,
+            extra_runnote_lines_fn=imports_timing_lines if tradeflow == 'imports' else None,
+        )
+
 def main():
     """Smart batch processing with enhanced country handling"""
     run_start_time = time.time()
@@ -397,6 +478,15 @@ def main():
         # year even if the shell originally passed a comma-separated list.
         os.environ['EXIOBASE_YEAR'] = str(year)
 
+        # COUNTRY.list "comprehensive" replaces the normal per-tradeflow/
+        # per-country loop entirely for this year -- it ignores TRADEFLOW
+        # and needs no country-list resolution (see PLAN-comprehensive.md).
+        if get_country_list_value(config).lower() == 'comprehensive':
+            run_comprehensive_processing(year)
+            if interstate_countries:
+                run_interstate_step(year, interstate_countries)
+            continue
+
         # Process each tradeflow separately
         for tradeflow in tradeflows:
             print(f"\n{'='*100}")
@@ -428,8 +518,17 @@ def main():
     print(f"OUTPUT FOR: {output_for}")
     print(f"{'='*100}")
 
-def process_tradeflow(config, tradeflow, all_countries, countries, completed_countries):
-    """Process a single tradeflow for all countries"""
+def process_tradeflow(config, tradeflow, all_countries, countries, completed_countries, scripts=None, extra_runnote_lines_fn=None):
+    """Process a single tradeflow for all countries.
+
+    `scripts`/`extra_runnote_lines_fn` pass through to run_country_processing
+    (defaults preserve today's default/all behavior unchanged) -- reused by
+    run_comprehensive_processing for the post-comprehensive default-14 pass
+    instead of a second, near-duplicate batch loop (see
+    PLAN-comprehensive.md). `extra_runnote_lines_fn`, if given, is called as
+    extra_runnote_lines_fn(country) and its return value passed straight
+    through as create_runnote's extra_lines.
+    """
     print(f"\n[START] STARTING SMART BATCH PROCESSING")
     print(f"Trade Flow: {tradeflow}")
     print(f"All countries: {', '.join(all_countries)}")
@@ -479,7 +578,11 @@ def process_tradeflow(config, tradeflow, all_countries, countries, completed_cou
             print(f"[TIME] Batch time remaining: {remaining_time:.1f} hours (safety limit; no measured pace yet)")
         print(f"{'[RELOAD]' * 20}")
 
-        country_success, country_duration = run_country_processing(country, tradeflow, batch_start, batch_timeout, country_timeout)
+        country_success, country_duration = run_country_processing(
+            country, tradeflow, batch_start, batch_timeout, country_timeout,
+            scripts=scripts,
+            extra_runnote_lines=extra_runnote_lines_fn(country) if extra_runnote_lines_fn else None,
+        )
         results[country] = country_success
         country_durations.append(country_duration)
 
@@ -524,8 +627,14 @@ def process_tradeflow(config, tradeflow, all_countries, countries, completed_cou
         except:
             print(f"  [QUESTION] {country}: Unable to count files")
 
-def create_runnote(country, tradeflow, start_time, total_time, success_count, total_scripts):
-    """Create runnote.md file to mark successful completion"""
+def create_runnote(country, tradeflow, start_time, total_time, success_count, total_scripts, extra_lines=None):
+    """Create runnote.md file to mark successful completion.
+
+    extra_lines: optional list of extra Markdown lines inserted right after
+    Duration/before Scripts Completed -- used by comprehensive mode's
+    default-list downstream pass to record the Azure imports-pull duration
+    for this country/tradeflow (see PLAN-comprehensive.md's "Local .csv
+    output for country folders" section)."""
     from datetime import datetime
     import os
     
@@ -595,6 +704,10 @@ def create_runnote(country, tradeflow, start_time, total_time, success_count, to
     # Format duration section only if we have meaningful duration
     duration_minutes = total_time / 60
     duration_section = f"**Duration:** {duration_minutes:.1f} minutes\n" if duration_minutes >= 0.1 else ""
+    # extra_lines are pre-formatted Markdown lines (e.g. "**Imports export
+    # (Azure):** 4.2s") -- the caller decides the exact wording/formatting.
+    if extra_lines:
+        duration_section += "".join(f"{line}\n" for line in extra_lines)
     
     # Format title based on completion status
     title_suffix = "Processing Complete" if truly_successful else "Run Note"

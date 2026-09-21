@@ -2,10 +2,29 @@ NOTES:
   1: COUNTRY.list "default" = run only incomplete ones within AU, BR, CA,
     CN, DE, FR, GB, IN, IT, JP, KR, RU, WM, US
   2: COUNTRY.list "all" = run all (could take hours)
+  3: COUNTRY.list "comprehensive" = push every Exiobase region (all 49 —
+    see PLAN-comprehensive.md) directly to Azure for one year. No
+    per-country trade_id blocks. Set TRADEFLOW to anything; comprehensive
+    ignores it (imports/exports/domestic all come out of one extraction —
+    see PLAN-comprehensive.md). Writes a local year/[year]/[country]/
+    folder for every one of the 49 regions by default — set
+    COMPREHENSIVE.folders to "default" to only write folders for the 14
+    default-list countries instead (every region is still pushed to Azure
+    either way; this only controls local .csv output).
+  4: COMPREHENSIVE.target picks the Azure database — "year_db" (default) —
+    a dedicated industrydb_[year] database, created if missing, the same
+    per-year convention already used for industrydb_2019/2021/2023 — no
+    year column needed, trade_id is globally sequential within that
+    database. "industrydb" — the shared, multi-year database instead,
+    with year as a real column on trade/trade_factor and trade_id unique
+    only per year (see PLAN-comprehensive.md's "Database write path").
 TRADEFLOW: domestic,imports,exports
 YEAR: 2021
 COUNTRY:
   list: US
+COMPREHENSIVE:
+  folders: all
+  target: year_db
 NODES:
   exiobase:
     source_python: main.py

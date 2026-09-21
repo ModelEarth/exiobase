@@ -45,6 +45,8 @@ def load_config():
     year_env = os.environ.get('EXIOBASE_YEAR')
     country_list_env = os.environ.get('EXIOBASE_COUNTRY_LIST')
     country_env = os.environ.get('EXIOBASE_COUNTRY')
+    comprehensive_folders_env = os.environ.get('EXIOBASE_COMPREHENSIVE_FOLDERS')
+    comprehensive_target_env = os.environ.get('EXIOBASE_COMPREHENSIVE_TARGET')
 
     if tradeflow_env:
         config['TRADEFLOW'] = tradeflow_env
@@ -67,7 +69,38 @@ def load_config():
         else:
             config['COUNTRY'] = {'list': str(config['COUNTRY']), 'current': country_env}
 
+    if comprehensive_folders_env:
+        config.setdefault('COMPREHENSIVE', {})['folders'] = comprehensive_folders_env
+
+    if comprehensive_target_env:
+        config.setdefault('COMPREHENSIVE', {})['target'] = comprehensive_target_env
+
     return config
+
+
+def get_comprehensive_folders_scope(config):
+    """
+    Resolve COMPREHENSIVE.folders ("all" or "default") to a lowercase string,
+    defaulting to "all" when the key is absent (a config.yaml from before
+    this setting existed, or one that never set it). Any value other than
+    the literal "default" is treated as "all" — see PLAN-comprehensive.md's
+    "config.yaml" section.
+    """
+    comprehensive = config.get('COMPREHENSIVE') or {}
+    folders = str(comprehensive.get('folders', 'all')).strip().lower()
+    return 'default' if folders == 'default' else 'all'
+
+
+def get_comprehensive_target(config):
+    """
+    Resolve COMPREHENSIVE.target ("year_db" or "industrydb") to a lowercase
+    string, defaulting to "year_db" when the key is absent. Any value other
+    than the literal "industrydb" is treated as "year_db" — see
+    PLAN-comprehensive.md's "Database write path" section.
+    """
+    comprehensive = config.get('COMPREHENSIVE') or {}
+    target = str(comprehensive.get('target', 'year_db')).strip().lower()
+    return 'industrydb' if target == 'industrydb' else 'year_db'
 
 def update_config(updates):
     """

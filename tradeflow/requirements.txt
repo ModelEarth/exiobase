@@ -7,3 +7,4 @@ pathlib2>=2.3.7; python_version < '3.4'
 SQLAlchemy>=2.0.0
 psycopg2-binary>=2.9.0      # for postgres
 pyodbc>=4.0.39             # for mssql
+requests>=2.31.0           # for trade_comprehensive.py's reference-tables preflight call to team's Rust API

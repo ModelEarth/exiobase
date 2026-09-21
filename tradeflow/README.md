@@ -114,6 +114,8 @@ The bea/main.py command generates the following CSV files for US domestic flows:
 
 **trade_id** is a sequential row index assigned per output file — it resets on every regeneration and only correlates a trade.csv row with its trade_factor.csv rows from the same run.
 
+**Exiobase trade record order.** Comprehensive mode's `trade_id` sequence follows Exiobase's own row order (the `Z` matrix — inter-industry transaction flows), not a fresh alphabetical sort: region2 by its fixed position in Exiobase's own region list, industry1/industry2 by their fixed sector position, both independent of which rows happen to clear that year's amount threshold. Since this structural order never changes for a given Exiobase release, `trade_id` for a year comes out identical across regenerations — a stable, per-year index other systems can key off of when collaborating with this data, without it shifting on every rerun. See [PLAN-comprehensive.md](PLAN-comprehensive.md).
+
 **interstate_id** is a composite string key, not a surrogate integer, since one international trade row fans out into many state-pair rows. Two forms exist depending on the file:
 
 - Primary (interstate.csv, BEA Sector level): `{trade_id}-US-{state1}-US-{state2}-{sector1}-{sector2}`
