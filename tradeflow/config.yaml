@@ -1,13 +1,20 @@
 NOTES:
   1: COUNTRY.list "default" = run only incomplete ones within AU, BR, CA,
     CN, DE, FR, GB, IN, IT, JP, KR, RU, WM, US
-  2: COUNTRY.list "all" = run all (could take hours)
-  3: COUNTRY.list "comprehensive" = push 49 country/regions. No per-country trade_id blocks.
-    Writes a local year/[year]/[country]/ folder for every one of the 49 regions by default — 
+  2: COUNTRY.list "all" = run the standard per-country pipeline (with
+    per-country trade_id blocks) for every country folder already present
+    under year/[year] (falling back to the default 14 if none exist yet).
+    Unlike "comprehensive" below, this processes one country at a time and
+    never extracts all 49 Exiobase regions in a single pass.
+  3: COUNTRY.list "comprehensive" = extracts all 49 Exiobase country/regions
+    in one continuous-numbering pass. No per-country trade_id blocks. How
+    many of those 49 actually get pushed to Azure / written locally depends
+    on COMPREHENSIVE.folders (note 4 below) — it is NOT always all 49.
   4: Set COMPREHENSIVE.folders (or its short alias SCOPE) to "default" to
-    limit BOTH local .csv output and the Azure push itself to the 14
-    default-list countries (changed for the 2024 run -- 2018 used "all",
-    pushing and writing every region). trade_id still counts every one of
+    limit BOTH local .csv output and the Azure push itself to just the 14
+    default-list countries -- this is what our standard comprehensive
+    command uses (starting with the 2024 run; 2018 used "all", pushing and
+    writing every region). trade_id still counts every one of
     the 49 regions in Exiobase's own row order, so a skipped region just
     leaves a gap in the numbering rather than shifting later regions' ids.
     Imports for an in-scope country are assembled from this run's own

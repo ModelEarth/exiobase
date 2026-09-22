@@ -1,5 +1,47 @@
 # Comprehensive trade push: every region, direct to Azure, local folders for all 49 by default
 
+## Known issue: 2024's `trade_factor` coverage is far sparser than other years
+
+`industrydb_2024`'s `trade_factor` table has only ~403K rows covering ~20% of `trade` rows
+(1 factor per covered row), vs. `industrydb_2020`'s ~7.6M rows covering ~100% of `trade` rows
+(~4 factors/row on average). Investigated 2026-09-21; root cause is the **upstream Exiobase
+source file for 2024**, not a bug in `trade_extraction.py`'s `compute_trade_factor` or the
+comprehensive push:
+
+- The downloaded `exiobase_data/IOT_2024_pxp.zip` (fetched via `exiobase_download.py`'s direct
+  Zenodo fallback, since `pymrio.download_exiobase3` doesn't resolve current Zenodo URLs) is
+  **missing the `employment/`, `energy/`, and `water/` extension folders entirely** — it only has
+  `factor_inputs/`, `air_emissions/`, `material/`, `nutrients/`, `land/`. 2020's zip has all 8.
+  `compute_trade_factor`'s `hasattr(exio_model, ext_name)` check correctly skips missing
+  extensions, so this alone would explain a coverage drop, but not the full picture.
+- Worse: of the extensions that *are* present, `air_emissions.M` and `land.M` (the
+  `calc_all()`-computed characterized-multiplier matrices `compute_trade_factor` actually reads)
+  come out **entirely zero** for 2024 — confirmed directly via `pymrio.parse_exiobase3(...).calc_all()`
+  — even though their raw `F`/`S` coefficient matrices have real, substantial nonzero data
+  (1.2M+ nonzero cells). Only `material.M` computes real values for 2024. This wasn't traced
+  further into pymrio's `M = S @ L` computation internals; it looks like a data-quality issue in
+  the specific 2024 file Zenodo served (Exiobase's real historical releases only officially cover
+  through ~2022, so "2024" is likely a preliminary/nowcast release with incomplete or
+  malformed extension normalization), not something fixable in this repo's code.
+- Practical implication: **treat any comprehensive push for a very recent year (2023/2024) as
+  needing this same coverage check** (`count(DISTINCT region1)` and a `trade`/`trade_factor` row
+  ratio, per-region, before trusting the push) — don't assume parity with established years like
+  2018-2022 just because the run completes without errors.
+
+## Known gap: comprehensive push never truncates existing tables first
+
+Neither `trade_comprehensive.py` nor `industrydb.py`'s push functions truncate `trade`/
+`trade_factor`/`interstate`/`interstate_factor` before pushing — they only `INSERT ... ON
+CONFLICT`. Re-running comprehensive mode for a year that already has data from the **old**
+per-country block `trade_id` scheme (e.g. 2019, 2021, 2023 as originally pushed) will leave the
+old-scheme rows in place alongside the new full-Exiobase-order rows, with no guarantee their
+`trade_id` ranges don't collide or their data doesn't just duplicate/conflict. Before re-running
+comprehensive mode against a year with pre-existing data from a different scheme, truncate that
+year's tables first with the team repo's standalone tool (not wired into any API):
+```
+cd team && cargo run --bin truncate_year_tables -- <year>
+```
+
 Plan for a new `comprehensive` processing mode that extracts trade flows for **every** Exiobase
 region in one pass (not a curated 14-country list) and writes them straight to Azure Postgres. By
 default the target is a dedicated per-year database (`industrydb_{year}`, created if missing) — the
