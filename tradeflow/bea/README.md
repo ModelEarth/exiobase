@@ -66,7 +66,58 @@ EPA's own product doesn't cover these five extensions — there's no curated map
 
 See exiobase_factors.py's `EXTENSION_STRESSOR_PREFIXES` for the exact selection.
 
-**Will this align with the older EPA repo and the newer cornerstone site?** For GHGs: yes with the older [USEPA/USEEIO](https://github.com/USEPA/USEEIO) `import_emission_factors` repo directly — we copied its exact `mrio_config.yml` mapping and its `clean_exiobase_M_matrix()` split-map-filter-sum approach, so our GHG aggregation implements the same methodology on the same Exiobase data (modulo whatever Exiobase version/year each side uses). cornerstone-data hasn't published its own copy of that specific GHG tool — it isn't in their repo list — so there's nothing there to diverge from; our conceptual alignment with cornerstone is only through `useeior`'s shared "Greenhouse Gases" indicator naming, not a second implementation to check against. For the other five: our aggregates now target the *same scope* as cornerstone's `useeior` indicators (Jobs Supported, Energy Use, Land Use, Minerals and Metals Use, Water Use), but will **not** numerically match either EPA repo's or cornerstone's published figures for these — those are computed from entirely different (US government inventory) source data, not from Exiobase, so scope alignment is the most we get without that larger data-integration project.
+**Will this align with the older EPA repo and the newer cornerstone site?** For GHGs: yes with the older [USEPA/USEEIO](https://github.com/USEPA/USEEIO) `import_emission_factors` repo directly — we copied its exact `mrio_config.yml` mapping and its `clean_exiobase_M_matrix()` split-map-filter-sum approach, so our GHG aggregation implements the same methodology on the same Exiobase data (modulo whatever Exiobase version/year each side uses). cornerstone-data hasn't published its own copy of that specific GHG tool — it isn't in their repo list — so there's nothing there to diverge from; our conceptual alignment with cornerstone is only through `useeior`'s shared "Greenhouse Gases" indicator naming, not a second implementation to check against. For the other five, see the next section — we no longer have to leave this as "scope match only."
+
+### Aligning the other five with USEEIO's own pre-compiled indicators (not raw BLS/EIA/USDA/USGS)
+
+The "not attempted here" above (integrating BLS/EIA/USDA/USGS ourselves) turned out to be
+unnecessary — EPA's own model-building pipeline (`useeior`) already computes JOBS/ENRG/LAND/MNRL/
+WATR from those four agencies' data and publishes the *result* as a per-BEA-Detail-sector,
+per-dollar-of-output matrix. That result is already sitting in this checkout, no network fetch
+needed: **`io/build/api/USEEIOv2.0.1-411/`** — a local vendored copy of
+[`ModelEarth/useeio-json`](https://github.com/ModelEarth/useeio-json)'s national model, already
+used by `profile/footprint/js/config.js`, `io/charts/inflow-outflow/index.html`, and
+`io/charts/bubble/js/bubble.js`. `indicators.json` confirms all 23 USEEIO indicators are present
+(including JOBS/ENRG/LAND/MNRL/WATR); `matrix/N.json` is the 23×411 total-requirements (direct +
+upstream) matrix, `sectors.json` gives each column's BEA Detail code. Joining that to our own
+trade data means comparing against USEEIO's real government-sourced numbers instead of only our
+own Exiobase-scoped approximation of them.
+
+**`bea/useeio_indicator_alignment.py`** does this join, mirroring
+`profile/footprint/index.html`'s already-validated `loadBeaFactorData()` (the CO2/CH4/N2O vs. EPA
+comparison above): `trade.csv`'s `industry1` (the exporting country's Exiobase industry — what's
+actually being imported) resolves to every matching `USEEIO_Detail_2012` BEA code via
+`exio_to_useeio2_commodity_concordance.csv` (full fan-out, no fractional split, same as the GHG
+comparison), each BEA Detail's "ours" rate is our own summed `trade_factor.csv` level divided by
+our own summed USD imports for that code (`amount * EUR_TO_USD_2019`, no per-year lookup yet — see
+the TO DO below), and "USEEIO" is `N[indicator_index][sector_index]` converted from USEEIO's
+native unit into ours (jobs→1000 persons, MJ→TJ, m²·yr→km² approximated as a static area, kg→
+kilotonnes, kg→Mm³ via 1000 kg/m³). Run it with `python3 bea/useeio_indicator_alignment.py --year
+2019`; it writes a per-BEA-Detail CSV alongside itself and prints a summary.
+
+**2019 results** (379 BEA Detail codes matched, `usd_imports > 0`):
+
+| Extension | matched | median ratio (ours/USEEIO) | % within 2x |
+|---|---|---|---|
+| employment | 376 | 4.23x | 15.7% |
+| energy | 0 | n/a — ours is 0 for every row (Exiobase's own energy extension is all-zero, see above) | n/a |
+| land | 377 | 1.57x | 47.7% |
+| material | 378 | 4.75x | 17.2% |
+| water | 378 | 1.16x | 55.0% |
+
+**Reading these numbers:** land and water land in the same rough neighborhood as the CO2 GHG
+comparison (median ~0.9-1.6x) — plausibly explained by the uncorrected 2012-vs-2019 dollar-year
+mismatch alone (USEEIO's N matrix is fixed at 2012-USD-of-output; our USD imports above are 2019
+trade converted at a flat EUR/USD rate with no inflation adjustment back to 2012 dollars — that's
+~15-20% of CPI drift baked into every ratio before any real methodology difference). Employment
+and material are a real, unexplained gap (~4-5x, systematically over rather than scattered both
+ways) too large for currency drift alone to explain — not root-caused here. Candidates worth
+checking before trusting these two: whether "Employment people" (our proxy) and JOBS (USEEIO's
+headcount, which includes indirect/induced jobs across the whole supply chain) are actually the
+same scope of jobs: whether Minerals and Metals Use's Detail-level 2012 vs 2017 boundary drift
+(see the NAICS differences note near the end of this file) misattributes some material use, or
+whether Exiobase's "Domestic Extraction Used - Metal Ores / Non-Metallic Minerals" and USEEIO's
+MNRL indicator just don't line up 1:1 in scope despite the name match.
 
 Related pages:
 - [US interstate trade map](../../../profile/trade/map/state.html)
