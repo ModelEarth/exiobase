@@ -30,7 +30,7 @@ The unit for any given row is found by joining to `factor.csv` on `factor_id` an
 
 Trade is traditionally called flow, but the term lacks clarity when relating annual trade rows to multiple factors.
 
-Later, the 6-character "commodity" sectors can reside in the 5-character "trade" tables, or in tables starting with "commodity".
+The 5-character Exiobase `industry_id` used in `trade.industry1`/`industry2` relates to a 6-character "commodity" sector via `trade-data/concordance/exio_to_useeio2_commodity_concordance.csv` (Exiobase sector name → USEEIO/BEA Detail code, e.g. `1111A0`) — many-to-many, not a clean relabeling. Those Detail codes are NAICS-derived, so yes, they're relatable to 6-digit NAICS too, but not a clean 1:1 crosswalk — EPA applies its own splits/merges on top of NAICS per USEEIO version (see [bea/README.md](bea#interstate)'s industry/commodity granularity table for the full coarse-to-granular breakdown, including how this same commodity code shows up on `interstate.commodity_code`).
 
 ## State-to-State: interstate, factor, sector
 

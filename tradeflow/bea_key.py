@@ -63,10 +63,11 @@ def _try_load_local_cloud_repo_env(start_dir):
 def find_bea_api_key(provided_key=None, start_dir=None):
     """
     Resolve BEA_API_KEY from, in order: a provided value, a local cloud-repo
-    .env, webroot/docker/.env, webroot/.env, then the system environment.
-    Loads any discovered .env file into os.environ so a later subprocess
-    (e.g. bea/main.py, invoked from main.py) inherits the key without
-    re-searching. Returns the key string, or None if not found anywhere.
+    .env, webroot/automation/paths.yaml's env_file: target, webroot/docker/.env,
+    webroot/.env, then the system environment. Loads any discovered .env file
+    into os.environ so a later subprocess (e.g. bea/main.py, invoked from
+    main.py) inherits the key without re-searching. Returns the key string,
+    or None if not found anywhere.
     """
     if provided_key:
         return provided_key
@@ -81,8 +82,25 @@ def find_bea_api_key(provided_key=None, start_dir=None):
 
     # tradeflow -> exiobase -> webroot
     webroot = start_dir.resolve().parents[1]
+
+    # webroot/automation/paths.yaml's env_file: key is the current canonical
+    # location (same resolution as chat/ingestion/test_vectordb_sync.py's
+    # resolve_env_path() and chat/lib/env-loader.ts) -- the .env holding
+    # secrets like BEA_API_KEY now lives outside webroot (e.g. a sibling
+    # safe/ folder), not in docker/.env, which is checked below only as a
+    # deprecated fallback for checkouts that haven't migrated yet.
+    paths_yaml = webroot / 'automation' / 'paths.yaml'
+    if paths_yaml.exists():
+        env_file = _resolve_env_file_from_paths_yaml(paths_yaml)
+        if env_file and env_file.exists():
+            load_dotenv(env_file)
+            env_key = os.getenv('BEA_API_KEY')
+            if env_key:
+                print(f"Loaded BEA API key from {env_file} (via automation/paths.yaml)")
+                return env_key
+
     search_paths = [
-        webroot / 'docker' / '.env',
+        webroot / 'docker' / '.env',  # deprecated location, kept as a fallback
         webroot / '.env',
     ]
     for env_path in search_paths:

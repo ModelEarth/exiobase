@@ -7,8 +7,13 @@ Now includes file existence checking to avoid regenerating existing trade.csv fi
 
 Usage:
     python bea/main.py --bea-key YOUR_API_KEY
-    python bea/main.py  # Uses BEA_API_KEY from webroot .env file
+    python bea/main.py  # Uses BEA_API_KEY from the .env file automation/paths.yaml points at
+                        # (falls back to webroot/docker/.env, webroot/.env). If none is found
+                        # and this is an interactive terminal, prompts for one; otherwise
+                        # continues with degraded columns -- see bea_key.py and
+                        # BEA_API_KEY_MISSING_NOTICE below for exactly what's affected.
     python bea/main.py --force-regen  # Force regeneration even if files exist
+    python bea/main.py --use-bea-placeholder  # Keep domestic/interstate output even without a key
 
 Optimization: Checks for existing trade.csv files before regenerating them.
 """
@@ -36,6 +41,27 @@ from main_api_client import BEAAPIClient
 from main_trade_analyzer import StateTradeAnalyzer
 from main_fedefl_integration import FEDEFLIntegrator
 from exiobase_industry import industry_id_to_sector_weights
+
+# Shown once when no BEA_API_KEY was found (see _load_bea_api_key), and again
+# as a shorter reminder at the start/end of process_all_tradeflows() so it's
+# visible even if the initial notice scrolled off a long run's output.
+BEA_API_KEY_MISSING_NOTICE = (
+    "\n" + "!" * 60 +
+    "\nNo BEA_API_KEY found.\n"
+    "Register at https://apps.bea.gov/api/signup/ then add it to your .env\n"
+    "file (see webroot/automation/paths.yaml for its location, or\n"
+    "webroot/docker/.env / webroot/.env as a fallback), or pass --bea-key.\n\n"
+    "What still works without it: commodity_code/industry_code for domestic\n"
+    "(interstate.csv) rows -- those come from local concordance files, not\n"
+    "the BEA API -- as long as --use-bea-placeholder is also passed.\n"
+    "Without --use-bea-placeholder AND without a key, domestic processing is\n"
+    "skipped entirely (interstate.csv/interstate_factor.csv won't be\n"
+    "generated at all) -- pass --use-bea-placeholder to still get\n"
+    "commodity_code/industry_code from the concordance files.\n"
+    "What's degraded either way: economic_multiplier falls back to 1.0\n"
+    "instead of a real BEA Input-Output multiplier.\n" +
+    "!" * 60
+)
 
 BEA_ORIGIN_ALLOCATION_LINES = {
     'agriculture': ('SAGDP2', 3, 'GDP by state: Agriculture, forestry, fishing and hunting'),
@@ -87,17 +113,31 @@ class USBEATradeFlow:
         
     def _load_bea_api_key(self, provided_key):
         """Load BEA API key via the shared bea_key lookup (command line,
-        local cloud-repo env, webroot/docker/.env, webroot/.env, or system
-        environment). Exits with guidance if not found anywhere."""
+        local cloud-repo env, webroot/automation/paths.yaml's env_file:
+        target, webroot/docker/.env, webroot/.env, or system environment).
+
+        Does NOT exit when the key is missing -- commodity_code/industry_code
+        for domestic/interstate rows come from local concordance files (see
+        _merge_bea_domestic) and don't need the BEA API at all; only
+        economic_multiplier (and the BEA-sourced imports/exports columns)
+        need a real key. So a missing key degrades some columns rather than
+        blocking the whole run. Gives an interactive chance to paste one in
+        when running at a real terminal; otherwise continues with None."""
         key = find_bea_api_key(provided_key, start_dir=Path(__file__).parent.parent)
         if key:
             return key
 
-        raise SystemExit(
-            "BEA_API_KEY not found.\n"
-            "Add BEA_API_KEY=your_key to webroot/docker/.env or webroot/.env\n"
-            "Register at https://apps.bea.gov/api/signup/"
-        )
+        print(BEA_API_KEY_MISSING_NOTICE)
+
+        if sys.stdin.isatty():
+            typed = input("Paste a BEA_API_KEY to use for this run (or press Enter to continue without one): ").strip()
+            if typed:
+                print("Using the key you entered for this run only -- add it to your .env file "
+                      "(see automation/paths.yaml) to skip this prompt next time.")
+                return typed
+
+        print("Continuing without a BEA_API_KEY -- affected columns above will use fallback values.\n")
+        return None
 
     def process_all_tradeflows(self):
         """Main processing pipeline for enhanced BEA trade analysis"""
@@ -110,20 +150,25 @@ class USBEATradeFlow:
                 tradeflows = [t.strip() for t in tradeflows.split(',')]
             
         print(f"\nProcessing {len(tradeflows)} trade flows: {', '.join(tradeflows)}")
-        
+        if not self.bea_api_key:
+            print("(no BEA_API_KEY -- economic_multiplier will use its 1.0 fallback; "
+                  "pass --use-bea-placeholder to still get domestic commodity_code/industry_code)")
+
         for tradeflow in tradeflows:
             print(f"\n{'='*60}")
             print(f"Processing {tradeflow.upper()} trade flows")
             print(f"{'='*60}")
-            
+
             self.current_tradeflow = tradeflow
             self.process_bea_enhanced_tradeflow(tradeflow)
-        
+
         # Generate comprehensive validation report
         self._generate_validation_report()
-        
+
         total_time = time.time() - start_time
         print(f"\nCompleted all US-BEA trade flows in {total_time:.1f} seconds")
+        if not self.bea_api_key:
+            print(BEA_API_KEY_MISSING_NOTICE)
         
     def process_bea_enhanced_tradeflow(self, tradeflow):
         """Enhanced processing pipeline for single tradeflow"""

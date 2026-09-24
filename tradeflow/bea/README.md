@@ -244,6 +244,35 @@ commodity_code, industry_code, economic_multiplier
 (BEA Sector level, the primary/committed file; the full-detail `interstate-lg.csv` sibling has the
 same columns at Exiobase's native industry grain, `industry1`/`industry2` instead of `sector1`/`sector2`.)
 
+**Four different industry/commodity classifications appear on this one table, at four different
+granularities — confirmed by reading `_merge_bea_domestic()` in `main.py`, since the column names
+alone don't make the distinction obvious:**
+
+| Column | Classification | Granularity | Populated from |
+|---|---|---|---|
+| `industry1`/`industry2` (interstate-lg only) | raw Exiobase industry | ~200 codes, 5-char | `industry.csv` (Exiobase's own taxonomy) |
+| `commodity_code` | USEEIO/BEA **Detail** (NAICS-derived) | ~411 codes, 6-char (e.g. `1111A0`) | `trade-data/concordance/exio_to_useeio2_commodity_concordance.csv`, joined via `industry1`'s Exiobase name — no BEA API needed |
+| `industry_code` | BEA **Summary** | ~71-73 codes | `trade-data/concordance/useeio_internal_concordance.csv`'s `BEA_Summary` column, keyed off the same commodity_code — no BEA API needed; only `economic_multiplier` (below) actually calls the BEA API |
+| `sector1`/`sector2` | BEA **Sector** (the coarsest tier, ~21 categories, e.g. `11`=Agriculture, `21`=Mining) | ~21 codes | `bea_summary_to_sector_concordance.csv`, one more rollup above Summary — see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md) |
+
+So the full chain, finest to coarsest: `industry1`/`industry2` (Exiobase) → `commodity_code` (BEA
+Detail) → `industry_code` (BEA Summary) → `sector1`/`sector2` (BEA Sector).
+
+**`state_industry_code` is a fifth, unrelated classification** — not part of the chain above at
+all. It's one of only 7 broad BEA GDP-by-state allocation buckets (`agriculture`, `mining`,
+`utilities`, `construction`, `manufacturing`, `transportation`, `services` — see
+`BEA_ORIGIN_ALLOCATION_LINES`/`BEA_DESTINATION_ALLOCATION_LINES` in `main.py`), used only to
+weight how much of a national flow gets allocated to a given state pair. Don't confuse it with
+`industry_code` (BEA Summary) just because both contain the word "industry."
+
+**Matching the USEEIO Excel sheets without a `BEA_API_KEY`:** `commodity_code` and `industry_code`
+above don't need one — they're a pure local-file join through the two concordance CSVs. The only
+things a missing key actually affects are `economic_multiplier` (falls back to `1.0`) and, without
+also passing `--use-bea-placeholder`, domestic processing being skipped entirely (see
+`BEA_API_KEY_MISSING_NOTICE` in `bea/main.py` for the exact tradeoffs — `bea/main.py` now prints
+this at both the start and end of a run when no key is found, and offers to prompt for one
+interactively instead of hard-exiting like it used to).
+
 `interstate_id` is a composite string key (`{year}-{trade_id}-US-{state1}-US-{state2}-{state_industry_code}`), not a surrogate integer — it's the `PRIMARY KEY` of the `interstate` table and the join target for `interstate_factor`/`interstate_estimate`, since one `trade_id` fans out to 150+ state-pair rows. `trade_id` is kept on `interstate` (not on `interstate_factor`/`interstate_estimate`) as the only path back to the originating international `trade` row (`trade.amount`, `trade.country`, `trade.flow_type`) — navigate as `interstate_factor → interstate → trade`. There is no `year` column — one database per year makes it redundant.
 
 **interstate.amount** is in million Euros (M EUR), consistent with `trade.amount` — both are sourced from the Exiobase Z matrix.
