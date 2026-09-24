@@ -371,3 +371,6 @@ trade_factors_lg.csv
 
 # BEA API response cache (regenerated locally)
 tradeflow/bea/bea_cache/
+
+# Census API response cache (regenerated locally)
+tradeflow/bea/census_cache/
