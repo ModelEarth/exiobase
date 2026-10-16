@@ -9,6 +9,10 @@
 
 <link type="text/css" rel="stylesheet" href="../../localsite/css/base.css" id="/localsite/css/base.css" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.href='https://model.earth/localsite/css/base.css';}">
 <script type="text/javascript" src="../../localsite/js/localsite.js?showheader=true&showsearch=true" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='https://model.earth/localsite/js/localsite.js?showheader=true&showsearch=true';}"></script>
+<link type="text/css" rel="stylesheet" href="../../localsite/css/tabulator.min.css" id="/localsite/css/tabulator.min.css" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.href='https://model.earth/localsite/css/tabulator.min.css';}">
+<link type="text/css" rel="stylesheet" href="../../localsite/css/base-tabulator.css" id="/localsite/css/base-tabulator.css" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.href='https://model.earth/localsite/css/base-tabulator.css';}">
+<script type="text/javascript" src="../../localsite/js/tabulator.min.js" id="/localsite/js/tabulator.min.js" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='https://model.earth/localsite/js/tabulator.min.js';}"></script>
+<script type="text/javascript" src="../../localsite/js/earthscape.js" id="/localsite/js/earthscape.js" onerror="if(!this.dataset.fallback){this.dataset.fallback=1;this.src='https://model.earth/localsite/js/earthscape.js';}"></script>
 <style>
 .content table { background-color: #ddd; }
 .dark .content table { background-color: #555; }
@@ -208,6 +212,86 @@ table {
   margin-top: 12px;
   margin-bottom: 16px;
 }
+
+/* Yearly runnote report */
+.runnote-panel {
+  position: relative;
+  margin: 18px 0;
+  padding: 16px 18px;
+  background: #f4f6f8;
+  border-radius: 12px;
+  container-type: inline-size;
+}
+.dark .runnote-panel { background: #1e1e1e; }
+.runnote-menu-holder { position: absolute; top: 12px; right: 12px; }
+.runnote-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 0 40px 6px 0; /* Leaves room for the panel menu circle */
+}
+.runnote-panel h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: #111;
+}
+.dark .runnote-panel h3 { color: #e5e7eb; }
+.runnote-extra-btn {
+  margin-left: auto;
+  padding: 6px 14px;
+  background: #10B981;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.runnote-extra-btn:hover { background: #059669; }
+.runnote-extra-btn:disabled { background: #9CA3AF; cursor: default; }
+.runnote-intro, .runnote-status {
+  font-size: 13px;
+  color: #6B7280;
+  margin-bottom: 10px;
+}
+.runnote-status { margin: 8px 0 0 0; }
+.runnote-status:empty { display: none; }
+.dark .runnote-intro, .dark .runnote-status { color: #9CA3AF; }
+#runnoteTable { border-radius: 8px; overflow: hidden; }
+#runnoteTable .tabulator-tableholder .tabulator-table,
+#runnoteTable .tabulator-row { background-color: #fff; }
+#runnoteTable .tabulator-cell { text-align: left; }
+#runnoteTable .tabulator-cell[tabulator-field="Year"] { font-weight: 600; }
+.dark #runnoteTable .tabulator-header,
+.dark #runnoteTable .tabulator-header .tabulator-col { background-color: #2a2a2a; color: #e5e7eb; border-color: #374151; }
+.dark #runnoteTable .tabulator-tableholder .tabulator-table,
+.dark #runnoteTable .tabulator-row { background-color: #1e1e1e; color: #d1d5db; }
+.dark #runnoteTable .tabulator-row .tabulator-cell { border-color: #374151; }
+/* Summary row, fixed below the rows like the header */
+#runnoteTable .tabulator-footer { border-top: 1px solid #999; }
+#runnoteTable .tabulator-footer .tabulator-calcs-holder,
+#runnoteTable .tabulator-row.tabulator-calcs { background-color: #e6e6e6; font-weight: 600; color: #333; }
+.dark #runnoteTable .tabulator-footer { border-top-color: #4B5563; }
+.dark #runnoteTable .tabulator-footer .tabulator-calcs-holder,
+.dark #runnoteTable .tabulator-row.tabulator-calcs { background-color: #2a2a2a; color: #e5e7eb; }
+.runnote-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #ECFDF5;
+  color: #065F46;
+}
+.runnote-badge.warn { background: #FEF2F2; color: #991B1B; }
+.dark .runnote-badge { background: #064e3b; color: #6EE7B7; }
+.dark .runnote-badge.warn { background: #7f1d1d; color: #FCA5A5; }
+.runnote-muted { color: #9CA3AF; }
+@container (max-width: 520px) {
+  .runnote-panel { padding: 12px; }
+  .runnote-extra-btn { margin-left: 0; }
+}
 </style>
 
 <script>
@@ -311,6 +395,22 @@ waitForLocalsiteJs();
       <h4>Loading asynchronously</h4>
       <p>The diagram used to wait on a fetch to the Rust API (<code>/api/db/industry-schema</code>) before drawing anything, so a slow or unresponsive database made the whole page feel stalled. Now it draws immediately using the static schema, then fetches the live schema in the background and re-renders — adding real row counts and the ⋮ per-table menu once that data arrives.</p>
     </section>
+  </div>
+
+  <!-- Yearly runnote report: one runnote.md per year from trade-data/year/{year}/US/domestic -->
+  <div class="runnote-panel" id="runnotePanel">
+    <div class="runnote-menu-holder"></div>
+    <div class="runnote-title-row">
+      <h3>US Domestic Runs by Year</h3>
+      <!-- Row Count & File Size now load with the table. Reactivate this button if pulling the raw files is slow.
+      <button type="button" class="runnote-extra-btn" id="runnoteExtraBtn" disabled title="Fetches each year's trade.csv and checks file sizes">Load Row Count &amp; File Size</button>
+      -->
+    </div>
+    <div class="runnote-intro">
+      Processing notes from each year's <a href="https://github.com/ModelEarth/trade-data/tree/main/year" target="_parent">trade-data/year/[year]/US/domestic/runnote.md</a>, from 2018 forward. Click a column header to sort.
+    </div>
+    <div id="runnoteTable"></div>
+    <div class="runnote-status" id="runnoteStatus">Looking for yearly runnotes...</div>
   </div>
 
   <div id="readmeDiv"></div>
@@ -977,6 +1077,267 @@ waitForLocalsiteJs();
   }
   setupSchemaPanelMenu();
 
+})();
+</script>
+
+<script>
+// Yearly runnote report: reads trade-data/year/{year}/US/domestic/runnote.md for each year from 2018 forward
+// using loadEarthScapeYears() in localsite/js/earthscape.js. Years without a runnote are skipped.
+(function () {
+  'use strict';
+
+  const START_YEAR = 2018;
+  const RUNNOTE_PATH = 'year/this_is_year/US/domestic/runnote.md';
+  const SOURCES = [
+    '../../trade-data/',                                            // Local trade-data clone
+    'https://raw.githubusercontent.com/ModelEarth/trade-data/main/' // Published files
+  ];
+  const GITHUB_TREE = 'https://github.com/ModelEarth/trade-data/tree/main/';
+  const EXTRA_FIELDS = ['rowCount', 'totalAmount', 'largestAmount', 'tradeSize', 'interstateSize', 'interstateFactorSize'];
+  const OK_MARK = /^(\[OK\]|✅)$/u;
+  const DASH = '<span class="runnote-muted">–</span>';
+
+  const statusEl = document.getElementById('runnoteStatus');
+  const extraBtn = document.getElementById('runnoteExtraBtn');
+  let runnoteTable = null;
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ---- Runnote parsing ----
+  // Value of a "**Label:** value" line
+  function runnoteField(text, label) {
+    const match = text.match(new RegExp('\\*\\*' + label + ':\\*\\*\\s*(.+)', 'i'));
+    return match ? match[1].trim() : '';
+  }
+
+  // "1.2 minutes", "45 seconds" or "1.5 hours" as minutes
+  function durationMinutes(text) {
+    const match = text.match(/([\d.]+)\s*(second|minute|hour)/i);
+    if (!match) return null;
+    const amount = parseFloat(match[1]);
+    const unit = match[2].toLowerCase();
+    const minutes = unit === 'second' ? amount / 60 : (unit === 'hour' ? amount * 60 : amount);
+    return Math.round(minutes * 10) / 10;
+  }
+
+  function parseRunnote(text, year, url) {
+    if (!/Processing Date/i.test(text)) return []; // Not a runnote
+    const scripts = runnoteField(text, 'Scripts Completed').match(/(\d+)\s*\/\s*(\d+)/);
+    const statusRaw = runnoteField(text, 'Status');
+    const status = statusRaw.replace(/\[[A-Z]+\]|✅|❌|⚠️/gu, '').trim().toLowerCase();
+    const files = [...text.matchAll(/^\s*-\s*(\[[A-Z]+\]|✅|❌|⚠️)?\s*([\w.-]+\.csv)\s*$/gmu)];
+    return {
+      Year: year,
+      processed: runnoteField(text, 'Processing Date'),
+      duration: durationMinutes(runnoteField(text, 'Duration')),
+      scriptsDone: scripts ? +scripts[1] : null,
+      scriptsTotal: scripts ? +scripts[2] : null,
+      status: status.charAt(0).toUpperCase() + status.slice(1),
+      statusOk: /success/i.test(statusRaw) && !/fail|partial|error/i.test(statusRaw),
+      files: files.filter(f => !f[1] || OK_MARK.test(f[1])).length,
+      fileList: files.map(f => (f[1] && !OK_MARK.test(f[1])) ? f[2] + ' ' + f[1] : f[2]).join(', '),
+      source: url.indexOf('raw.githubusercontent.com') >= 0 ? 'GitHub' : 'Local',
+      base: url.replace(/runnote\.md$/, ''),
+      noteUrl: url,
+      treeUrl: GITHUB_TREE + 'year/' + year + '/US/domestic'
+    };
+  }
+
+  // ---- Cell formatters ----
+  function numberCell(digits) {
+    return cell => {
+      const value = cell.getValue();
+      return (value === null || value === undefined) ? DASH : Number(value).toLocaleString(undefined, { maximumFractionDigits: digits });
+    };
+  }
+
+  function sizeCell(cell) {
+    const bytes = cell.getValue();
+    if (bytes === null || bytes === undefined) return DASH;
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes, unit = 0;
+    while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+    return size.toLocaleString(undefined, { maximumFractionDigits: unit < 2 ? 0 : 1 }) + ' ' + units[unit];
+  }
+
+  // ---- Summary row calculations (bottomCalc), shown in the fixed footer row ----
+  const present = values => values.filter(v => v !== null && v !== undefined && v !== '');
+  const sumCalc = values => { const v = present(values); return v.length ? v.reduce((a, b) => a + Number(b), 0) : null; };
+  const avgCalc = values => { const v = present(values); return v.length ? sumCalc(v) / v.length : null; };
+  const latestCalc = values => present(values).sort().pop() || null;
+  const scriptsCalc = (values, data) => {
+    const rows = data.filter(d => d.scriptsDone !== null);
+    return rows.length ? rows.reduce((a, d) => a + d.scriptsDone, 0) + '/' + rows.reduce((a, d) => a + d.scriptsTotal, 0) : null;
+  };
+  const statusCalc = (values, data) => data.length ? data.filter(d => d.statusOk).length + ' of ' + data.length + ' OK' : null;
+  const sourceCalc = values => {
+    const counts = {};
+    present(values).forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+    return Object.keys(counts).map(k => counts[k] + ' ' + k).join(', ') || null;
+  };
+  const largestCalc = (values, data) => {
+    const top = data.filter(d => d.largestAmount !== null && d.largestAmount !== undefined)
+      .sort((a, b) => b.largestAmount - a.largestAmount)[0];
+    return top ? { amount: top.largestAmount, label: top.largestFlow, year: top.Year } : null;
+  };
+  const textCalcCell = (prefix, suffix) => cell => {
+    const value = cell.getValue();
+    return (value === null || value === undefined) ? DASH : (prefix || '') + escapeHtml(value) + (suffix || '');
+  };
+  const prefixedCell = (prefix, formatter) => cell => {
+    const value = cell.getValue();
+    return (value === null || value === undefined) ? DASH : prefix + formatter(cell);
+  };
+
+  const columns = [
+    { title: 'Year', field: 'Year', sorter: 'number', frozen: true,
+      formatter: cell => '<a href="' + cell.getRow().getData().treeUrl + '" target="_parent" title="Open folder on GitHub">' + cell.getValue() + '</a>',
+      bottomCalc: 'count', bottomCalcFormatter: textCalcCell('', ' years') },
+    { title: 'Processed', field: 'processed', sorter: 'string',
+      bottomCalc: latestCalc, bottomCalcFormatter: textCalcCell('Latest ') },
+    { title: 'Scripts', field: 'scriptsDone', sorter: 'number',
+      formatter: cell => { const d = cell.getRow().getData(); return d.scriptsDone === null ? DASH : d.scriptsDone + '/' + d.scriptsTotal; },
+      bottomCalc: scriptsCalc, bottomCalcFormatter: textCalcCell() },
+    // From each year's trade.csv and file sizes (fetchExtras)
+    { title: 'Row Count', field: 'rowCount', sorter: 'number', formatter: numberCell(0), headerTooltip: 'Rows in trade.csv',
+      bottomCalc: sumCalc, bottomCalcFormatter: numberCell(0) },
+    { title: 'Total (M EUR)', field: 'totalAmount', sorter: 'number', formatter: numberCell(0), headerTooltip: 'Sum of trade.csv amount, in million euros',
+      bottomCalc: sumCalc, bottomCalcFormatter: numberCell(0) },
+    { title: 'Largest Flow', field: 'largestAmount', sorter: 'number', headerTooltip: 'Largest industry-to-industry amount in trade.csv (M EUR)',
+      formatter: cell => { const d = cell.getRow().getData(); return d.largestFlow ? escapeHtml(d.largestFlow) + ' <span class="runnote-muted">' + numberCell(1)(cell) + '</span>' : DASH; },
+      bottomCalc: largestCalc,
+      bottomCalcFormatter: cell => {
+        const top = cell.getValue();
+        return top ? escapeHtml(top.label) + ' <span class="runnote-muted">' + top.year + ', ' + top.amount.toLocaleString(undefined, { maximumFractionDigits: 1 }) + '</span>' : DASH;
+      } },
+    { title: 'trade.csv Size', field: 'tradeSize', sorter: 'number', formatter: sizeCell,
+      bottomCalc: sumCalc, bottomCalcFormatter: sizeCell },
+    { title: 'interstate.csv Size', field: 'interstateSize', sorter: 'number', formatter: sizeCell,
+      bottomCalc: sumCalc, bottomCalcFormatter: sizeCell },
+    { title: 'interstate_factor.csv Size', field: 'interstateFactorSize', sorter: 'number', formatter: sizeCell,
+      bottomCalc: sumCalc, bottomCalcFormatter: sizeCell },
+    // From runnote.md
+    { title: 'Minutes', field: 'duration', sorter: 'number', formatter: numberCell(1), headerTooltip: 'Processing duration in minutes',
+      bottomCalc: avgCalc, bottomCalcFormatter: prefixedCell('avg ', numberCell(1)) },
+    { title: 'Status', field: 'status', sorter: 'string',
+      formatter: cell => { const d = cell.getRow().getData(); return d.status ? '<span class="runnote-badge' + (d.statusOk ? '' : ' warn') + '">' + escapeHtml(d.status) + '</span>' : DASH; },
+      bottomCalc: statusCalc, bottomCalcFormatter: textCalcCell() },
+    { title: 'Files', field: 'files', sorter: 'number', tooltip: (e, cell) => cell.getRow().getData().fileList,
+      bottomCalc: sumCalc, bottomCalcFormatter: numberCell(0) },
+    { title: 'Source', field: 'source', sorter: 'string',
+      formatter: cell => '<a href="' + escapeHtml(cell.getRow().getData().noteUrl) + '" target="_blank" rel="noopener" title="Open runnote.md">' + cell.getValue() + '</a>',
+      bottomCalc: sourceCalc, bottomCalcFormatter: textCalcCell() }
+  ];
+
+  // ---- Lazy loaded Row Count & File Size ----
+  async function fetchTradeStats(row) {
+    const response = await fetch(row.base + 'trade.csv');
+    if (!response.ok) return {};
+    const blob = await response.blob();
+    const lines = (await blob.text()).split(/\r?\n/).filter(Boolean);
+    const header = lines[0].split(',');
+    const iAmount = header.indexOf('amount'), iFrom = header.indexOf('industry1'), iTo = header.indexOf('industry2');
+    let total = 0, largest = null;
+    for (let i = 1; i < lines.length; i++) {
+      const cells = lines[i].split(',');
+      const amount = parseFloat(cells[iAmount]);
+      if (isNaN(amount)) continue;
+      total += amount;
+      if (!largest || amount > largest.amount) largest = { amount: amount, label: cells[iFrom] + ' → ' + cells[iTo] };
+    }
+    return {
+      rowCount: lines.length - 1,
+      totalAmount: total,
+      largestAmount: largest ? largest.amount : null,
+      largestFlow: largest ? largest.label : '',
+      tradeSize: blob.size
+    };
+  }
+
+  // Size from a HEAD request, or null when the server doesn't report one
+  async function fetchFileSize(url) {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      const length = response.ok ? response.headers.get('content-length') : null;
+      return length ? parseInt(length, 10) : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Adds Row Count, totals and file sizes to each year's row
+  function fetchExtras(rows) {
+    return Promise.all(rows.map(async row => {
+      const [stats, interstateSize, interstateFactorSize] = await Promise.all([
+        fetchTradeStats(row).catch(() => ({})),
+        fetchFileSize(row.base + 'interstate.csv'),
+        fetchFileSize(row.base + 'interstate_factor.csv')
+      ]);
+      return Object.assign(row, { interstateSize: interstateSize, interstateFactorSize: interstateFactorSize }, stats);
+    }));
+  }
+
+  // Lazy load alternative: reactivate with the commented-out runnoteExtraBtn, set visible: false on the
+  // trade.csv and size columns, and remove onData from loadEarthScapeYears below.
+  if (extraBtn) {
+    extraBtn.addEventListener('click', async () => {
+      if (!runnoteTable) return;
+      extraBtn.disabled = true;
+      extraBtn.textContent = 'Loading...';
+      await runnoteTable.updateData(await fetchExtras(runnoteTable.getData()));
+      runnoteTable.recalc(); // Refresh the summary row
+      EXTRA_FIELDS.forEach(field => runnoteTable.showColumn(field));
+      runnoteTable.redraw(true);
+      extraBtn.textContent = 'Row Count & File Size Loaded';
+    });
+  }
+
+  // ---- Load the report ----
+  function startRunnoteReport() {
+    addPanelMenu({ panelType: 'List', panelLabel: 'Report', targetPanelId: 'runnotePanel', containerSelector: '#runnotePanel .runnote-menu-holder', inline: true, datasourcePath: 'trade-data/year' }).render();
+
+    const endYear = new Date().getFullYear();
+    loadEarthScapeYears({
+      elementID: 'runnoteTable',
+      dataset: SOURCES.map(root => root + RUNNOTE_PATH),
+      startYear: START_YEAR,
+      endYear: endYear,
+      parse: parseRunnote,
+      onData: fetchExtras,
+      columns: columns,
+      index: 'Year',
+      layout: 'fitDataFill',
+      maxHeight: '420px', // Rows scroll between the fixed header and summary row
+      initialSort: [{ column: 'Year', dir: 'desc' }],
+      tableOptions: { placeholder: 'No runnotes found from ' + START_YEAR + ' forward.' }
+    }).then(result => {
+      runnoteTable = result.table;
+      const years = result.rows.map(row => row.Year).sort();
+      if (!years.length) {
+        statusEl.textContent = 'No runnotes found from ' + START_YEAR + ' to ' + endYear + '.';
+        return;
+      }
+      statusEl.textContent = 'Found ' + years.length + ' of ' + (endYear - START_YEAR + 1) + ' years checked (' + START_YEAR + '–' + endYear + '). Later years appear once their runnote.md is added.';
+      if (extraBtn) extraBtn.disabled = false;
+    }).catch(err => {
+      console.error(err);
+      statusEl.textContent = 'Could not load the yearly runnotes: ' + err.message;
+    });
+  }
+
+  // localsite.js and earthscape.js can arrive late when their model.earth fallbacks load.
+  const waitStart = Date.now();
+  (function waitForHelpers() {
+    if (typeof loadEarthScapeYears === 'function' && typeof waitForElm === 'function' && typeof addPanelMenu === 'function') {
+      startRunnoteReport();
+    } else if (Date.now() - waitStart < 10000) {
+      requestAnimationFrame(waitForHelpers);
+    } else {
+      statusEl.textContent = 'The report could not start because localsite.js or earthscape.js did not load.';
+    }
+  })();
 })();
 </script>
 
