@@ -5,7 +5,7 @@ Exiobase US-to-US domestic `trade_id` relates trade to state-to-state `interstat
 
 # Primary tables: <span style="color:#aaa">trade, factor, industry</span>
 
-Table naming designed for 3rd graders. [View Report Sample](../../profile/footprint/) from [Exiobase .csv output](https://github.com/ModelEarth/trade-data/tree/main/year) and [US State Data](../../profile/footprint/)
+Table naming designed for 3rd graders. [View Report Sample](../../profile/#countries=all) from [Exiobase .csv output](https://github.com/ModelEarth/trade-data/tree/main/year) and [US State Data](../../profile/#usstates=all)
 
 **The trade_id field** in trade.csv relates 4 values (region1, region2, industry1, industry2) to multiple impact factors for each trade row.
 

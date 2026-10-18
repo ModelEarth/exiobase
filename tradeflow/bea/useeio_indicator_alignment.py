@@ -13,7 +13,7 @@ vendored copy of ModelEarth/useeio-json's national model already used by
 profile/footprint, io/charts/inflow-outflow and io/charts/bubble). No network
 fetch needed — it's already a sibling directory in this checkout.
 
-Mirrors the join/aggregation methodology of profile/footprint/index.html's
+Mirrors the join/aggregation methodology of profile/index.html's
 loadBeaFactorData() (the already-validated CO2/CH4/N2O comparison against
 EPA's 2019 import factors file): industry1 (the exporting country's Exiobase
 industry — what's actually being imported) joins via its Exiobase name to
