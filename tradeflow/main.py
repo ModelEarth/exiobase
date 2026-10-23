@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from config_loader import load_config, resolve_comprehensive_targets  # also validates PyYAML is installed
+from config_loader import load_config, resolve_comprehensive_targets, require_pymrio  # also validates PyYAML is installed
 import yaml
 
 # Set UTF-8 encoding for Windows console
@@ -425,6 +425,7 @@ def main():
     run_start_time = time.time()
     save_config = '--saveconfig' in sys.argv
     interstate_countries = resolve_interstate_countries()
+    require_pymrio()
 
     if interstate_countries:
         print(f"[INTERSTATE] --interstate {','.join(interstate_countries)} requested — checking prerequisites before starting...")

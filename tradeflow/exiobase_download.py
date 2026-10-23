@@ -64,19 +64,17 @@ def _download_direct(model_path: Path, year: int, model_type: str = MODEL_TYPE) 
 def ensure_exiobase_file(model_path: Path, year: int, model_type: str = MODEL_TYPE):
     """
     Ensure the Exiobase zip for `year` is present, downloading it if needed.
-    Tries pymrio's downloader first, falls back to a direct Zenodo download,
-    then falls back to the prior year if that year isn't available and no
-    download for it already exists locally (to avoid silently reusing stale
-    data someone else placed there for a different run).
+    Tries pymrio's downloader first, then a direct Zenodo download. There's no
+    prior-year fallback: output folders are named by the requested year, so another
+    year's tables would be written under the wrong year.
 
-    Returns (path, actual_year) on success, or (None, year) if every download
-    path failed and only simulated fallback data can be used.
+    Returns the path on success, or None if both downloads failed.
     """
     model_path.mkdir(exist_ok=True)
     exio_file = model_path / f'IOT_{year}_{model_type}.zip'
     if exio_file.exists():
         print(f"Found existing Exiobase file: {exio_file}")
-        return exio_file, year
+        return exio_file
 
     print(f"No local Exiobase {year} file found — starting download.")
     print(f"Destination: {exio_file}")
@@ -93,32 +91,15 @@ def ensure_exiobase_file(model_path: Path, year: int, model_type: str = MODEL_TY
                 f"API format (/api/records/ID/files/NAME.zip/content). Trying direct download."
             )
         print(f"Successfully downloaded Exiobase {year} data")
-        return exio_file, year
+        return exio_file
     except Exception as e:
         print(f"pymrio download issue: {e}")
 
     try:
-        path = _download_direct(model_path, year, model_type)
-        return path, year
+        return _download_direct(model_path, year, model_type)
     except Exception as direct_e:
         print(f"Direct download failed for {year}: {direct_e}")
-
-    fallback_year = year - 1
-    fallback_file = model_path / f'IOT_{fallback_year}_{model_type}.zip'
-    if fallback_file.exists():
-        print(f"Prior year {fallback_year} already has downloaded data, preventing rerun. Exiting process.")
-        print("Please manually download the requested year or use an available year.")
-        return None, year
-
-    print(f"Trying to download prior year {fallback_year}...")
-    try:
-        path = _download_direct(model_path, fallback_year, model_type)
-        print(f"Successfully downloaded Exiobase {fallback_year} data")
-        return path, fallback_year
-    except Exception as fallback_e:
-        print(f"Fallback download failed for {fallback_year}: {fallback_e}")
-        print("Will use simulated fallback data.")
-        return None, year
+        return None
 
 
 def main():
@@ -131,14 +112,12 @@ def main():
         args.year = load_config()['YEAR']
 
     model_path = Path(__file__).parent / 'exiobase_data'
-    path, actual_year = ensure_exiobase_file(model_path, args.year)
+    path = ensure_exiobase_file(model_path, args.year)
 
     if path is None:
-        print("\nDownload unavailable — trade.py will fall back to simulated data if run now.")
+        print("\nDownload unavailable — trade.py will stop if run for this year now.")
         raise SystemExit(1)
 
-    if actual_year != args.year:
-        print(f"\nNote: requested {args.year} was unavailable; downloaded {actual_year} instead.")
     print(f"\nReady: {path}")
 
 

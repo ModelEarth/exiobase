@@ -197,18 +197,13 @@ class StateTradeAnalyzer:
         Populates self._satellite_data: dict of industry_id -> list of (factor_id, coefficient).
         Factor IDs are assigned by row position across extensions (same as factors.py).
         """
-        try:
-            import pymrio
-        except ImportError:
-            print("    pymrio not available — skipping satellite factor loading")
-            self._satellite_data = {}
-            return {}
+        # No fallback: without the factors, interstate.csv would be written without a
+        # matching interstate_factor.csv (bea/main.py checks for pymrio before starting)
+        import pymrio
 
         exiobase_zip_path = Path(exiobase_zip_path)
         if not exiobase_zip_path.exists():
-            print(f"    Exiobase zip not found: {exiobase_zip_path} — skipping satellite factor loading")
-            self._satellite_data = {}
-            return {}
+            raise FileNotFoundError(f"Exiobase zip not found: {exiobase_zip_path}")
 
         print(f"    Loading Exiobase satellite matrix from {exiobase_zip_path.name}...")
         exio_model = pymrio.parse_exiobase3(str(exiobase_zip_path)).calc_all()

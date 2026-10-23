@@ -29,7 +29,6 @@ Creates 4 files
 """
 
 import pandas as pd
-import numpy as np
 import pymrio
 import csv
 from datetime import datetime
@@ -81,7 +80,7 @@ class ExiobaseTradeFlow:
         self.model_path.mkdir(exist_ok=True)
 
         # Ensure the Exiobase zip is downloaded before sector mapping needs it
-        _, self.year = ensure_exiobase_file(self.model_path, self.year, self.model_type)
+        ensure_exiobase_file(self.model_path, self.year, self.model_type)
 
         # Load or create sector mapping
         self.sector_mapping = self.load_sector_mapping()
@@ -122,89 +121,45 @@ class ExiobaseTradeFlow:
         factors. The per-extension M-matrix merge itself now lives in
         trade_extraction.compute_trade_factor (shared with
         trade_comprehensive.py — see PLAN-comprehensive.md's "Memory
-        management" section); this method keeps the factor-mapping setup,
-        file I/O, and error/fallback handling that are specific to the
-        single-country CSV pipeline.
+        management" section); this method keeps the factor-mapping setup
+        and file I/O that are specific to the single-country CSV pipeline.
         """
         print("Creating trade_factor.csv with real Exiobase factor data...")
 
-        try:
-            # Load the factors mapping. Prefix-only names like "CO2" are
-            # ambiguous across multiple factors, so build_factor_mapping
-            # keys on the exact stressor name (plus formatting variants).
-            factors_file = get_reference_file_path(self.config, 'factors')
-            factors_df = pd.read_csv(factors_file)
-            factor_mapping = build_factor_mapping(factors_df)
-            print(f"Created factor mapping with {len(factor_mapping)} entries")
+        # Load the factors mapping. Prefix-only names like "CO2" are
+        # ambiguous across multiple factors, so build_factor_mapping
+        # keys on the exact stressor name (plus formatting variants).
+        factors_file = get_reference_file_path(self.config, 'factors')
+        factors_df = pd.read_csv(factors_file)
+        factor_mapping = build_factor_mapping(factors_df)
+        print(f"Created factor mapping with {len(factor_mapping)} entries")
 
-            trade_factor_df = compute_trade_factor(
-                trade_df, exio_model, self.sector_mapping, factor_mapping,
-                use_large_factors=self.use_large_factors, log=print,
-            )
+        trade_factor_df = compute_trade_factor(
+            trade_df, exio_model, self.sector_mapping, factor_mapping,
+            use_large_factors=self.use_large_factors, log=print,
+        )
 
-            # Determine output file based on mode
-            if self.use_large_factors:
-                output_file = get_file_path(self.config, 'trade_factor')
-                if not output_file.endswith('-max.csv'):
-                    output_file = output_file.replace('.csv', '-max.csv')
-                file_type = "large"
-                if not trade_factor_df.empty:
-                    print(f"⚠️  WARNING: Creating large trade_factor-max.csv (~1.5GB) - this may cause memory issues in trade_resource.py")
-            else:
-                output_file = get_file_path(self.config, 'trade_factor')
-                if output_file.endswith('-max.csv'):
-                    output_file = output_file.replace('-max.csv', '.csv')
-                file_type = "small"
-
-            if not trade_factor_df.empty:
-                trade_factor_df.to_csv(output_file, index=False)
-                print(f"Created {file_type} trade_factor file with {len(trade_factor_df)} factor-trade relationships")
-                print(f"File: {output_file}")
-            else:
-                print("No trade-factor relationships found, creating empty trade_factor.csv")
-                trade_factor_df.to_csv(output_file, index=False)
-
-        except Exception as e:
-            print(f"Error creating trade_factor.csv: {e}")
-            self.create_trade_factor_fallback(trade_df)
-
-    def create_trade_factor_fallback(self, trade_df):
-        """
-        Create a simplified trade_factor.csv for fallback data
-        """
-        print("Creating simplified trade_factor.csv with sample data...")
-        
-        try:
-            # Create sample factor relationships for major flows
-            sample_factors = []
-            
-            # Sample some common factors
-            common_factor_ids = [1, 5, 7, 15]  # As, CH4, CO2, N2O
-            
-            # For each trade flow, create sample factor relationships
-            for _, trade_row in trade_df.head(100).iterrows():  # Limit to first 100 for performance
-                for factor_id in common_factor_ids:
-                    # Create realistic sample coefficients
-                    if factor_id == 7:  # CO2
-                        coefficient = np.random.uniform(0.1, 2.0)
-                    elif factor_id == 5:  # CH4  
-                        coefficient = np.random.uniform(0.01, 0.1)
-                    else:
-                        coefficient = np.random.uniform(0.001, 0.05)
-                    
-                    sample_factors.append({
-                        'trade_id': trade_row['trade_id'],
-                        'factor_id': factor_id,
-                        'level': trade_row['amount'] * coefficient
-                    })
-            
-            trade_factor_df = pd.DataFrame(sample_factors)
+        # Determine output file based on mode
+        if self.use_large_factors:
             output_file = get_file_path(self.config, 'trade_factor')
+            if not output_file.endswith('-max.csv'):
+                output_file = output_file.replace('.csv', '-max.csv')
+            file_type = "large"
+            if not trade_factor_df.empty:
+                print(f"⚠️  WARNING: Creating large trade_factor-max.csv (~1.5GB) - this may cause memory issues in trade_resource.py")
+        else:
+            output_file = get_file_path(self.config, 'trade_factor')
+            if output_file.endswith('-max.csv'):
+                output_file = output_file.replace('-max.csv', '.csv')
+            file_type = "small"
+
+        if not trade_factor_df.empty:
             trade_factor_df.to_csv(output_file, index=False)
-            print(f"Created sample trade_factor.csv with {len(trade_factor_df)} relationships")
-            
-        except Exception as e:
-            print(f"Error creating fallback trade_factor.csv: {e}")
+            print(f"Created {file_type} trade_factor file with {len(trade_factor_df)} factor-trade relationships")
+            print(f"File: {output_file}")
+        else:
+            print("No trade-factor relationships found, creating empty trade_factor.csv")
+            trade_factor_df.to_csv(output_file, index=False)
 
     def download_and_process_exiobase(self):
         """
@@ -214,21 +169,15 @@ class ExiobaseTradeFlow:
 
         # Shared with exiobase_download.py's standalone --year guide so a
         # multi-GB download run this way behaves identically either way.
-        exio_file, actual_year = ensure_exiobase_file(self.model_path, self.year, self.model_type)
-        self.year = actual_year
-
+        exio_file = ensure_exiobase_file(self.model_path, self.year, self.model_type)
         if exio_file is None:
-            return self.load_fallback_data()
+            raise RuntimeError(
+                f"Could not obtain the Exiobase {self.year} file. "
+                f"Download it with: python3 exiobase_download.py --year {self.year}"
+            )
 
-        # Parse the downloaded Exiobase data
-        try:
-            print(f"Parsing Exiobase file: {exio_file}")
-            exio_model = pymrio.parse_exiobase3(exio_file).calc_all()
-            return exio_model
-        except Exception as e:
-            print(f"Parsing failed: {e}")
-            print("Using fallback method with simulated data...")
-            return self.load_fallback_data()
+        print(f"Parsing Exiobase file: {exio_file}")
+        return pymrio.parse_exiobase3(exio_file).calc_all()
 
     def extract_m_matrix_data(self, exio_model):
         """
@@ -325,103 +274,15 @@ class ExiobaseTradeFlow:
         
         return trade_data
 
-    def load_fallback_data(self):
-        """
-        Fallback method to generate realistic trade flow data when Exiobase download fails
-        """
-        print("Using fallback data generation...")
-        
-        # Simplified region and sector lists based on typical Exiobase structure
-        regions = ['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR',
-                  'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO',
-                  'SE', 'SI', 'SK', 'GB', 'JP', 'CN', 'CA', 'KR', 'BR', 'IN', 'MX', 'RU',
-                  'AU', 'CH', 'TR', 'TW', 'NO', 'ID', 'ZA', 'WA', 'WL', 'WE', 'WF', 'WM']
-        
-        # Use the same 5-character IDs from the mapping if available
-        if hasattr(self, 'sector_mapping') and self.sector_mapping:
-            sectors = list(set(self.sector_mapping.values()))[:50]  # Use actual IDs
-        else:
-            # Fallback 5-character sector codes
-            sectors = ['PADDY', 'WHEAT', 'CEREA', 'VEGET', 'OILSE', 'SUGAR', 'PLANT', 'CROPS',
-                      'CATTL', 'PIGS9', 'POULT', 'MEATA', 'ANIMA', 'RAWMI', 'WOOLS', 'MANUR',
-                      'FORES', 'FISHF', 'ANTHR', 'COKIN', 'OTHER', 'SUBBI', 'PATEN', 'LIGNI',
-                      'CRUDE', 'NATUR', 'IRON1', 'IRON2', 'ALUMI', 'COPPE', 'NICKE', 'ZINC1',
-                      'LEAD1', 'TIN12', 'OTHER', 'GOLD1', 'SILVE', 'PLATI', 'OTHER', 'URANI',
-                      'STONE', 'SAND1', 'CLAY1', 'CHEMI', 'SALT1', 'OTHER', 'PETRE', 'NATUR',
-                      'OTHER', 'MEAT1', 'MEAT2']
-        
-        np.random.seed(42)  # For reproducible results
-        
-        data = []
-        for region1 in regions:
-            for region2 in regions:
-                # Apply filtering based on tradeflow type
-                if self.tradeflow_type == 'imports':
-                    if region2 != self.country or region1 == self.country:
-                        continue
-                elif self.tradeflow_type == 'exports':
-                    if region1 != self.country or region2 == self.country:
-                        continue
-                elif self.tradeflow_type == 'domestic':
-                    if region1 != self.country or region2 != self.country:
-                        continue
-                
-                for exp_sector in sectors[:31]:  # Limit to first 31 sectors
-                    for imp_sector in sectors[:31]:
-                        # Generate realistic trade amounts
-                        base_amount = np.random.lognormal(8, 2.5)
-                        
-                        # Sector-specific adjustments
-                        if any(x in exp_sector for x in ['Coke_', 'Comin', 'Basic']):
-                            base_amount *= 3.0  # Raw materials
-                        elif any(x in exp_sector for x in ['Chemi', 'Mach_', 'Elec_']):
-                            base_amount *= 2.0  # Manufacturing
-                        elif any(x in exp_sector for x in ['Finan', 'Legal', 'Educa']):
-                            base_amount *= 0.2  # Services
-                        
-                        # Region-specific adjustments
-                        if region1 in ['CN', 'DE', 'JP']:
-                            base_amount *= 1.8
-                        elif region1 in ['CA', 'MX']:
-                            base_amount *= 1.3
-                        
-                        # Only include significant flows
-                        if base_amount > 0.1:
-                            data.append({
-                                'region1': region1,
-                                'region2': region2,
-                                'industry1': exp_sector,
-                                'industry2': imp_sector,
-                                'amount': round(base_amount, 2)
-                            })
-
-        df = pd.DataFrame(data)
-        # Add trade_id for fallback data
-        df['trade_id'] = df.index + 1
-        # Reorder columns (no 'year' column — one database per year makes it redundant)
-        df = df[['trade_id', 'region1', 'region2', 'industry1', 'industry2', 'amount']]
-
-        return df
-
     def process_trade_flows(self):
         """
         Process and format the trade flow data
         """
         print(f"Processing {self.tradeflow_type} flows for {self.year} with {self.country}...")
 
-        # Try to download and process real Exiobase data
         exio_model = self.download_and_process_exiobase()
-
-        if isinstance(exio_model, pd.DataFrame):
-            # Fallback data was returned
-            df = exio_model
-            # For fallback data, create trade_factor with dummy data
-            self.create_trade_factor_fallback(df)
-        else:
-            # Real Exiobase model was returned
-            df = self.extract_m_matrix_data(exio_model)
-            # Create trade_factor with real data
-            self.create_trade_factor(df, exio_model)
+        df = self.extract_m_matrix_data(exio_model)
+        self.create_trade_factor(df, exio_model)
 
         # Sort by amount descending to show largest flows first
         df = df.sort_values('amount', ascending=False)

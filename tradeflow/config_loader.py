@@ -8,20 +8,36 @@ import re
 import sys
 from pathlib import Path
 
-try:
-    import yaml
-except ModuleNotFoundError:
+def _exit_missing_dependency(name):
     env_prefix = ' '.join(f'{k}={v}' for k, v in os.environ.items() if k.startswith('EXIOBASE_'))
     original_cmd = ' '.join(sys.argv)
     retry_cmd = f"{env_prefix + ' ' if env_prefix else ''}.venv/bin/python3 {original_cmd}"
     sys.exit(
-        "Missing dependency: PyYAML.\n"
+        f"Missing dependency: {name}.\n"
         "This folder has a .venv with it installed. Options:\n"
         f"  1. Just this once:      {retry_cmd}\n"
         "  2. For this session:    source .venv/bin/activate\n"
         "  3. Permanently:         python3 -m pip install -r requirements.txt\n"
         "     (installs into whatever 'python3' you normally run — after this, the short command works in any terminal, no venv needed)"
     )
+
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    _exit_missing_dependency('PyYAML')
+
+
+def require_pymrio():
+    """
+    Stop before any processing when pymrio is missing. trade.py needs it to read the
+    Exiobase zip, and bea/main.py needs it for interstate_factor.csv, so without it a run
+    would write partial output (see bea/notes.md, next step 9).
+    """
+    try:
+        import pymrio  # noqa: F401
+    except ModuleNotFoundError:
+        _exit_missing_dependency('pymrio')
 
 def load_config():
     """

@@ -32,7 +32,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import existing modules
-from config_loader import load_config, get_file_path, get_reference_file_path
+from config_loader import load_config, get_file_path, get_reference_file_path, require_pymrio
 from bea_key import find_bea_api_key
 
 # Import US-BEA specialized modules
@@ -57,6 +57,26 @@ BEA_API_KEY_MISSING_NOTICE = (
     "to 1.0 instead of a real BEA Input-Output multiplier.\n" +
     "!" * 60
 )
+
+def ensure_exiobase_zip(year):
+    """
+    Return the Exiobase zip for `year`, downloading it the way trade.py does
+    (exiobase_download.ensure_exiobase_file) when it's missing. Stops the run when the
+    zip can't be had for that year, since interstate.csv would otherwise be written
+    without a matching interstate_factor.csv.
+    """
+    from exiobase_download import ensure_exiobase_file
+    year = int(year)
+    # tradeflow/exiobase_data, one level above bea/ (trade.py's model_path)
+    model_path = Path(__file__).parents[1] / 'exiobase_data'
+    exiobase_zip = ensure_exiobase_file(model_path, year)
+    if exiobase_zip is None:
+        sys.exit(
+            f"Exiobase {year} zip unavailable at {model_path / f'IOT_{year}_pxp.zip'} -- stopping, "
+            f"since interstate_factor.csv needs it. Download it with: python3 exiobase_download.py --year {year}"
+        )
+    return exiobase_zip
+
 
 class USBEATradeFlow:
     def __init__(self, bea_api_key=None, force_regeneration=False):
@@ -721,18 +741,8 @@ class USBEATradeFlow:
                 base_trade = pd.read_csv(trade_file)
 
                 # Load Exiobase satellite matrix so factor_id is added to every state-pair row.
-                # The zip lives two directories above bea/ (i.e. tradeflow/exiobase_data/).
-                exiobase_zip = (
-                    Path(__file__).parents[1]
-                    / 'exiobase_data'
-                    / f'IOT_{self.config["YEAR"]}_pxp.zip'
-                )
-                if exiobase_zip.exists():
-                    print("    Loading Exiobase satellite data for factor_id assignment...")
-                    self.state_analyzer.load_exiobase_satellite(exiobase_zip)
-                else:
-                    print(f"    Exiobase zip not found at {exiobase_zip}")
-                    print("    interstate_factor.csv will be generated without factor_id")
+                print("    Loading Exiobase satellite data for factor_id assignment...")
+                self.state_analyzer.load_exiobase_satellite(ensure_exiobase_zip(self.config['YEAR']))
 
                 # BEA Regional weights allocate flows to states
                 allocation_data = getattr(self, 'bea_state_allocation_data', pd.DataFrame())
@@ -1121,6 +1131,9 @@ def main():
                        help='Force regeneration of trade.csv files even if they exist')
     
     args = parser.parse_args()
+    require_pymrio()
+    # Before any BEA requests or output, so a missing zip stops the run up front
+    ensure_exiobase_zip(load_config()['YEAR'])
     
     try:
         print("Initializing US-BEA Trade Flow Analysis...")

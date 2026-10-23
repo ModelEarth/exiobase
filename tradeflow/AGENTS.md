@@ -101,9 +101,9 @@ It checks `exiobase_data/IOT_{year}_pxp.zip` first and does nothing if that
 file already exists. Otherwise it downloads Exiobase v3 (product-by-product,
 roughly 0.2-4 GB, depending on year) from Zenodo (https://doi.org/10.5281/zenodo.3583070), trying
 `pymrio.download_exiobase3()` first, then falling back to a direct Zenodo API
-download (pymrio's URL regex no longer matches Zenodo's current API format),
-then falling back to the prior year if the requested year isn't published yet
-and no download for that prior year already exists locally. The file lands in
+download (pymrio's URL regex no longer matches Zenodo's current API format).
+There's no prior-year fallback: output folders are named by the requested year,
+so another year's tables would be written under the wrong year. The file lands in
 `exiobase/tradeflow/exiobase_data/` (gitignored — never deployed).
 
 ### 1. **trade.py** - Primary Data Extraction and Processing
@@ -434,7 +434,7 @@ finishes. `main.py` checks that `exiobase/India_data/` exists upfront when `IN` 
 
 ### Error Recovery Mechanisms
 
-- **Automatic fallbacks**: Scripts use simulated data when Exiobase downloads fail
+- **No simulated data**: Scripts stop when the Exiobase file can't be downloaded or parsed, rather than writing made-up flows
 - **Resume functionality**: Batch processing skips countries with existing `runnote.md`
 - **Smart file selection**: Automatically chooses appropriate factor file based on trade flow type
 - **Progress tracking**: `runnote-inprogress.md` tracks processing stages for debugging

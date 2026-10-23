@@ -178,12 +178,11 @@ def run_comprehensive(year):
     model_path = Path(__file__).parent / 'exiobase_data'
     model_path.mkdir(exist_ok=True)
 
-    exio_file, actual_year = ensure_exiobase_file(model_path, year, 'pxp')
-    year = actual_year
+    exio_file = ensure_exiobase_file(model_path, year, 'pxp')
     if exio_file is None:
         sys.exit(
-            f"Could not obtain Exiobase file for {year} -- comprehensive mode has no "
-            "fallback-data path (unlike trade.py's single-country mode; see PLAN-comprehensive.md)."
+            f"Could not obtain Exiobase file for {year}. "
+            f"Download it with: python3 exiobase_download.py --year {year}"
         )
 
     print("Ensuring local reference files (industry.csv/sector.csv/sector_industry.csv/factor.csv)...")

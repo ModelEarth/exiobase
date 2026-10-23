@@ -25,18 +25,8 @@ def create_sector_mapping():
     
     if not exio_file.exists():
         print(f"Exiobase file not found for {year}: {exio_file}")
-        # Only fallback to a prior year that doesn't yet have downloaded data
-        # If the year prior to the missing year already has a download, then exit the process
-        fallback_year = year - 1
-        fallback_file = model_path / f'IOT_{fallback_year}_{model_type}.zip'
-        
-        if fallback_file.exists():
-            print(f"Found existing data for {fallback_year}, using that for sector mapping")
-            exio_file = fallback_file
-            year = fallback_year
-        else:
-            print(f"No Exiobase data files found for sector mapping (requested: {year}, checked: {fallback_year})")
-            return
+        print(f"Download it first with: python3 exiobase_download.py --year {year}")
+        return
     
     print(f"Loading Exiobase data from: {exio_file}")
     exio_model = pymrio.parse_exiobase3(exio_file)
