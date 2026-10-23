@@ -334,7 +334,7 @@ In some SQL installs, we'll place state data in the "trade" table with multi-cou
 
 #### interstate_factor - renamed from state_trade_flows.csv (State-Level Analysis)
 
-`state_trade_flows.csv` was removed from trade-data on 2026-09-19 (commit `ef96b7f`). The [interstate trade map](../../../profile/trade/map/state.html) still requests it and falls back to an embedded June 2026 snapshot in `profile/state-trade-data.js`, so the map doesn't show the current tables.
+`state_trade_flows.csv` was removed from trade-data on 2026-09-19 (commit `ef96b7f`). The [interstate trade map](../../../profile/trade/map/state.html) now builds its flows from `trade-us.csv`, `industry_category.csv` and `category_state.csv`. The Sankey charts (`profile/charts/sankey/state.html`) still use the June 2026 snapshot in `profile/state-trade-data.js`.
 interstate_id, factor_id, level, flow_type
 
 Real per-factor rows only — generated when Exiobase satellite data is available. `origin_state` and `destination_state` are not separate columns here — they are encoded in `interstate_id` and available via `interstate.state1` / `interstate.state2`.
