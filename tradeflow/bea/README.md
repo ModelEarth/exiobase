@@ -309,7 +309,9 @@ The interstate.amount is tradeflow amount allocated to a specific state (region)
 total_output_impact = interstate.amount * economic_multiplier
 ```
 
-The value comes from BEA InputOutput TableID 61 rows where `RowDescr` is `Total industry output requirement`. If no BEA match is found, the fallback is `1.0`.
+The value comes from BEA InputOutput TableID 61 rows where `RowDescr` is `Total industry output requirement`, for the supplying industry (`industry1`). If no BEA match is found, the fallback is `1.0`.
+
+In the Sector-level `interstate.csv`, each row sums many `interstate-lg.csv` rows, so `economic_multiplier` is their amount-weighted average: the sum of `amount × economic_multiplier` divided by the sum of `amount`. That keeps `total_output_impact` the same at both levels. `commodity_code` and `industry_code` are empty in `interstate.csv`, since a Sector row combines industries with different codes; they're filled in `interstate-lg.csv`. Before 2026-10-23, `interstate.csv` set `economic_multiplier` to 1.0 on every row.
 
 ## interstate_factor
 

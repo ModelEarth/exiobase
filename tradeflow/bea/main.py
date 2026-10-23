@@ -609,10 +609,11 @@ class USBEATradeFlow:
         state2/industry1/industry2 instead of region1/region2/industry1/
         industry2, including the same proportional-split handling for the
         16/200 industries with more than one candidate Sector).
-        commodity_code/industry_code/economic_multiplier are dropped back to
-        their fallback defaults ('', '', 1.0) — no single value is
-        well-defined once multiple original industries collapse into one
-        Sector row.
+        economic_multiplier becomes the amount-weighted average of the
+        collapsed rows' multipliers, which keeps the total output they
+        require (multiplier x amount sums). commodity_code/industry_code
+        are left empty, since a Sector row has no single code once several
+        industries collapse into it.
 
         Returns (primary_interstate_df, interstate_id_map) where
         interstate_id_map maps each original interstate_id to a list of (new
@@ -642,10 +643,13 @@ class USBEATradeFlow:
             print(f"    Warning: {dropped} interstate rows have an industry with no BEA Sector mapping, dropping from sector-level output")
 
         exploded['fractional_amount'] = exploded['amount'] * exploded['weight1'] * exploded['weight2']
+        multiplier = pd.to_numeric(exploded['economic_multiplier'], errors='coerce').fillna(1.0)
+        exploded['multiplied_amount'] = exploded['fractional_amount'] * multiplier
 
         grouped = (
             exploded.groupby(['state1', 'state2', 'sector1', 'sector2', 'state_industry_code'], as_index=False)
-            .agg(amount=('fractional_amount', 'sum'), trade_id=('trade_id', 'first'))
+            .agg(amount=('fractional_amount', 'sum'), multiplied_amount=('multiplied_amount', 'sum'),
+                 trade_id=('trade_id', 'first'))
         )
         # Plain 1-based integer, not a composite string — matches trade.py's
         # own trade_id convention (see PLAN-merge.md's two-stage ID design).
@@ -657,7 +661,9 @@ class USBEATradeFlow:
         grouped['interstate_id'] = grouped.index + 1
         grouped['commodity_code'] = ''
         grouped['industry_code'] = ''
-        grouped['economic_multiplier'] = 1.0
+        grouped['economic_multiplier'] = (
+            (grouped['multiplied_amount'] / grouped['amount']).where(grouped['amount'] > 0, 1.0).round(7)
+        )
 
         exploded['combined_weight'] = exploded['weight1'] * exploded['weight2']
         merged = exploded[['interstate_id', 'state1', 'state2', 'sector1', 'sector2', 'state_industry_code', 'combined_weight']].merge(
