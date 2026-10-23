@@ -113,7 +113,7 @@ def create_factors_csv():
     
     # Append the fixed aggregate-flow rows (factor_id 901+) used by the
     # default trade_factor.csv/interstate_factor.csv — see exiobase_factors.py.
-    # trade_factor_lg.csv/interstate_factor_lg.csv keep using the 1-721 raw
+    # trade_factor-max.csv/interstate_factor-max.csv keep using the 1-721 raw
     # per-stressor rows above; both live in this same factor.csv since the
     # aggregate ID block is chosen well clear of the raw range.
     for factor_id, unit, stressor, extension in aggregate_definitions():

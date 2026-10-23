@@ -255,7 +255,7 @@ def run_country_processing(country, tradeflow, batch_start_time, batch_timeout=1
     # Enhanced status message
     if success_count == len(scripts):
         print(f"[SUCCESS] {country} {tradeflow} processing FULLY SUCCESSFUL!")
-        print(f"[FOLDER] Generated: trade_factor.csv + trade_factor_lg.csv (721 factors)")
+        print(f"[FOLDER] Generated: trade_factor.csv + trade_factor-max.csv (721 factors)")
         
         # Create runnote.md for successful completion
         create_runnote(country, tradeflow, start_time, total_time, success_count, len(scripts), extra_lines=extra_runnote_lines)

@@ -28,15 +28,15 @@ def create_split_resources():
     try:
         # Use the small optimized trade_factor.csv (50 selected factors)
         trade_factor_file = get_file_path(config, 'trade_factor')
-        if trade_factor_file.endswith('_lg.csv'):
-            trade_factor_file = trade_factor_file.replace('_lg.csv', '.csv')
+        if trade_factor_file.endswith('-max.csv'):
+            trade_factor_file = trade_factor_file.replace('-max.csv', '.csv')
         
         trade_factor_df = pd.read_csv(trade_factor_file)
         print(f"Loaded {len(trade_factor_df)} trade-factor relationships (optimized small dataset)")
         print(f"File: {trade_factor_file}")
         
         # Check if large file exists and warn about potential issues
-        large_file = trade_factor_file.replace('.csv', '_lg.csv')
+        large_file = trade_factor_file.replace('.csv', '-max.csv')
         if Path(large_file).exists():
             print(f"\n💡 Note: Large file {large_file} exists but using optimized version")
             print(f"   Large file (~1.5GB) causes FATAL ERROR: v8::ToLocalChecked Empty MaybeLocal")

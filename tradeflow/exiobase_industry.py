@@ -49,7 +49,7 @@ def lg_path(path):
     """
     Given a primary output path (e.g. .../trade.csv), return its full-detail
     "-lg" sibling path (.../trade-lg.csv). Distinct from the pre-existing
-    "_lg" convention (trade_factor_lg.csv/interstate_factor_lg.csv, meaning
+    "-max" convention (trade_factor-max.csv/interstate_factor-max.csv, meaning
     "all 721 raw unaggregated factors") — this "-lg" means "full Exiobase
     industry detail, not aggregated to BEA Sector level." See
     PLAN.md.

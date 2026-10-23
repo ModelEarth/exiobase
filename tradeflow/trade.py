@@ -10,7 +10,7 @@ Creates small trade_factor.csv (50 to 120 factors, manageable size)
 
 Large File (Not Recommended):
 python trade.py -lag
-Creates trade_factor_lg.csv (~1.5GB, causes Node.js memory errors) 
+Creates trade_factor-max.csv (~1.5GB, causes Node.js memory errors) 
 
 Creates 4 files
 
@@ -24,7 +24,7 @@ Creates 4 files
 
   3. Trade Factors (your focus):
   - trade_factor.csv (default, small 50 to 120 factors)
-  - trade_factor_lg.csv (with -lag flag, large ~721 factors)
+  - trade_factor-max.csv (with -lag flag, large ~721 factors)
 
 """
 
@@ -145,15 +145,15 @@ class ExiobaseTradeFlow:
             # Determine output file based on mode
             if self.use_large_factors:
                 output_file = get_file_path(self.config, 'trade_factor')
-                if not output_file.endswith('_lg.csv'):
-                    output_file = output_file.replace('.csv', '_lg.csv')
+                if not output_file.endswith('-max.csv'):
+                    output_file = output_file.replace('.csv', '-max.csv')
                 file_type = "large"
                 if not trade_factor_df.empty:
-                    print(f"⚠️  WARNING: Creating large trade_factor_lg.csv (~1.5GB) - this may cause memory issues in trade_resource.py")
+                    print(f"⚠️  WARNING: Creating large trade_factor-max.csv (~1.5GB) - this may cause memory issues in trade_resource.py")
             else:
                 output_file = get_file_path(self.config, 'trade_factor')
-                if output_file.endswith('_lg.csv'):
-                    output_file = output_file.replace('_lg.csv', '.csv')
+                if output_file.endswith('-max.csv'):
+                    output_file = output_file.replace('-max.csv', '.csv')
                 file_type = "small"
 
             if not trade_factor_df.empty:
@@ -495,12 +495,12 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Generate trade factors for Exiobase data')
     parser.add_argument('-lag', '--large', action='store_true', 
-                       help='Generate large trade_factor_lg.csv with all factors (WARNING: ~1.5GB file, may cause memory issues)')
+                       help='Generate large trade_factor-max.csv with all factors (WARNING: ~1.5GB file, may cause memory issues)')
     
     args = parser.parse_args()
     
     if args.large:
-        print("🚀 Large factors mode enabled - generating comprehensive trade_factor_lg.csv")
+        print("🚀 Large factors mode enabled - generating comprehensive trade_factor-max.csv")
         print("⚠️  WARNING: This will create a ~1.5GB file that may cause FATAL ERROR in trade_resource.py")
         print("   Node.js v8::ToLocalChecked Empty MaybeLocal error after ~10 minutes")
         print("   Consider using the default small file mode instead")

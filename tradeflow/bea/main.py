@@ -41,6 +41,7 @@ from main_api_client import BEAAPIClient
 from main_trade_analyzer import StateTradeAnalyzer
 from main_fedefl_integration import FEDEFLIntegrator
 from exiobase_industry import industry_id_to_sector_weights
+from category_state import fetch_state_allocation_weights, write_category_state, build_trade_us
 
 # Shown once when no BEA_API_KEY was found (see _load_bea_api_key), and again
 # as a shorter reminder at the start/end of process_all_tradeflows() so it's
@@ -62,26 +63,6 @@ BEA_API_KEY_MISSING_NOTICE = (
     "instead of a real BEA Input-Output multiplier.\n" +
     "!" * 60
 )
-
-BEA_ORIGIN_ALLOCATION_LINES = {
-    'agriculture': ('SAGDP2', 3, 'GDP by state: Agriculture, forestry, fishing and hunting'),
-    'mining': ('SAGDP2', 6, 'GDP by state: Mining, quarrying, oil, and gas extraction'),
-    'utilities': ('SAGDP2', 10, 'GDP by state: Utilities'),
-    'construction': ('SAGDP2', 11, 'GDP by state: Construction'),
-    'manufacturing': ('SAGDP2', 12, 'GDP by state: Manufacturing'),
-    'transportation': ('SAGDP2', 36, 'GDP by state: Transportation and warehousing'),
-    'services': ('SAGDP2', 92, 'GDP by state: Private services-providing industries'),
-}
-
-BEA_DESTINATION_ALLOCATION_LINES = {
-    'agriculture':    ('SAGDP2', 3,  'GDP by state: Agriculture, forestry, fishing and hunting'),
-    'mining':         ('SAGDP2', 6,  'GDP by state: Mining, quarrying, oil, and gas extraction'),
-    'utilities':      ('SAGDP2', 10, 'GDP by state: Utilities'),
-    'construction':   ('SAGDP2', 11, 'GDP by state: Construction'),
-    'manufacturing':  ('SAGDP2', 12, 'GDP by state: Manufacturing'),
-    'transportation': ('SAGDP2', 36, 'GDP by state: Transportation and warehousing'),
-    'services':       ('SAGDP2', 92, 'GDP by state: Private services-providing industries'),
-}
 
 class USBEATradeFlow:
     def __init__(self, bea_api_key=None, force_regeneration=False, use_bea_placeholder=False):
@@ -162,6 +143,9 @@ class USBEATradeFlow:
             self.current_tradeflow = tradeflow
             self.process_bea_enhanced_tradeflow(tradeflow)
 
+        if 'domestic' in tradeflows:
+            self._build_trade_us()
+
         # Generate comprehensive validation report
         self._generate_validation_report()
 
@@ -170,6 +154,22 @@ class USBEATradeFlow:
         if not self.bea_api_key:
             print(BEA_API_KEY_MISSING_NOTICE)
         
+    def _build_trade_us(self):
+        """trade-us.csv and industry_category.csv, once domestic and imports trade.csv are written"""
+        original_tradeflow = self.config['TRADEFLOW']
+        self.config['TRADEFLOW'] = 'domestic'
+        domestic_dir = Path(get_file_path(self.config, 'industryflow')).parent
+        self.config['TRADEFLOW'] = original_tradeflow
+        if not (domestic_dir / 'category_state.csv').exists():
+            print("  No category_state.csv -- skipping trade-us.csv")
+            return
+        print("\nBuilding trade-us.csv (state supply chains, e.g. for profile/item)...")
+        build_trade_us(
+            domestic_dir.parent,
+            self.state_analyzer._categorize_industry,
+            self.state_analyzer.industry_category_by_id.keys(),
+        )
+
     def process_bea_enhanced_tradeflow(self, tradeflow):
         """Enhanced processing pipeline for single tradeflow"""
         flow_start = time.time()
@@ -401,43 +401,14 @@ class USBEATradeFlow:
         """Fetch BEA Regional state weights used for interstate allocation."""
         print("  Fetching BEA Regional state allocation weights...")
 
-        allocation_frames = []
-
-        for weight_type, line_map in (
-            ('origin', BEA_ORIGIN_ALLOCATION_LINES),
-            ('destination', BEA_DESTINATION_ALLOCATION_LINES),
-        ):
-            for category, (table_name, line_code, description) in line_map.items():
-                response = self.bea_client.get_regional_data(
-                    year=self.config['YEAR'],
-                    table_name=table_name,
-                    line_code=line_code,
-                )
-                regional_df = self.bea_client.process_regional_response(response)
-                weights = self._build_state_allocation_weights(
-                    regional_df,
-                    category,
-                    weight_type,
-                    table_name,
-                    line_code,
-                    description,
-                )
-                if not weights.empty:
-                    allocation_frames.append(weights)
-
-        if not allocation_frames:
-            self.bea_state_allocation_data = pd.DataFrame()
+        self.bea_state_allocation_data = fetch_state_allocation_weights(
+            self.bea_client,
+            self.config['YEAR'],
+            self.state_analyzer.state_codes,
+        )
+        if self.bea_state_allocation_data.empty:
             print("    No BEA Regional allocation weights returned")
             return
-
-        self.bea_state_allocation_data = pd.concat(
-            allocation_frames,
-            ignore_index=True,
-            copy=False,
-        ).sort_values(
-            ['state_industry_code', 'weight_type', 'weight'],
-            ascending=[True, True, False],
-        )
 
         category_count = self.bea_state_allocation_data['state_industry_code'].nunique()
         state_count = self.bea_state_allocation_data['state'].nunique()
@@ -446,67 +417,6 @@ class USBEATradeFlow:
             f"({len(self.bea_state_allocation_data)} rows, {category_count} categories, {state_count} states)"
         )
 
-    def _build_state_allocation_weights(
-        self,
-        regional_df,
-        category,
-        weight_type,
-        table_name,
-        line_code,
-        description,
-    ):
-        """Convert a BEA Regional response into normalized state allocation weights."""
-        required_cols = {'state_name', 'value'}
-        if regional_df.empty or not required_cols.issubset(regional_df.columns):
-            return pd.DataFrame()
-
-        state_lookup = dict(zip(
-            self.state_analyzer.state_codes['state_name'],
-            self.state_analyzer.state_codes['state_code'],
-        ))
-
-        weights = regional_df.copy()
-        weights['state_name'] = (
-            weights['state_name']
-            .astype(str)
-            .str.replace('*', '', regex=False)
-            .str.strip()
-        )
-        weights['state'] = weights['state_name'].map(state_lookup)
-        weights['value'] = pd.to_numeric(weights['value'], errors='coerce')
-        weights = weights[weights['state'].notna() & (weights['value'] > 0)]
-
-        if weights.empty:
-            return pd.DataFrame()
-
-        weights = weights.groupby(['state', 'state_name'], as_index=False)['value'].sum()
-        total_value = weights['value'].sum()
-        if total_value <= 0:
-            return pd.DataFrame()
-
-        weights['weight'] = weights['value'] / total_value
-        weights['year'] = self.config['YEAR']
-        weights['state_industry_code'] = category
-        weights['weight_type'] = weight_type
-        weights['source_table'] = table_name
-        weights['line_code'] = line_code
-        weights['source_description'] = description
-
-        return weights[
-            [
-                'year',
-                'state_industry_code',
-                'state',
-                'state_name',
-                'weight_type',
-                'weight',
-                'value',
-                'source_table',
-                'line_code',
-                'source_description',
-            ]
-        ]
-    
     def _merge_bea_imports(self, base_trade):
         """Merge US-BEA imports data with base trade"""
         enhanced = base_trade.copy()
@@ -833,6 +743,9 @@ class USBEATradeFlow:
                     print("    interstate.csv and interstate_factor.csv will not be generated.")
                     return
 
+                # All states' weights, since the interstate split keeps only the leading states
+                write_category_state(allocation_data, trade_file.parent)
+
                 state_flows = self.state_analyzer.disaggregate_domestic_flows(
                     base_trade, allocation_data
                 )
@@ -926,7 +839,7 @@ class USBEATradeFlow:
 
                     # Optionally generate large file (all 721 raw factors, unaggregated)
                     if not use_partial:
-                        lg_file = self.config['FILES'].get('interstate_factor_lg', 'interstate_factor_lg.csv')
+                        lg_file = self.config['FILES'].get('interstate_factor_max', 'interstate_factor-max.csv')
                         lg_count = self._write_interstate_factor_file(
                             state_flows,
                             output_path / lg_file,
@@ -997,7 +910,7 @@ class USBEATradeFlow:
 
         use_aggregate=True (the default file): EPA-style aggregated flows
         (get_satellite_aggregate_entries — see exiobase_factors.py).
-        use_aggregate=False (the "_lg" file): every raw per-stressor factor,
+        use_aggregate=False (the "-max" file): every raw per-stressor factor,
         unaggregated (get_satellite_factor_entries).
 
         When interstate_id_map/primary_output_file are given, also

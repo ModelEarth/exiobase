@@ -114,7 +114,7 @@ and no download for that prior year already exists locally. The file lands in
   - `sector.csv` / `sector_industry.csv` - BEA Sector classification (~21 categories) and its many-to-many join to `industry.csv`, used by `interstate.csv`'s Sector-level aggregation — see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md)
   - `factor.csv` - Environmental factor definitions (721 factors)
   - `trade_factor.csv` - Environmental coefficients (aggregated flows — ~10 per industry, not a top-N slice; see below)
-  - `trade_factor_lg.csv` - All environmental coefficients (721 factors for domestic flows)
+  - `trade_factor-max.csv` - All environmental coefficients (721 factors for domestic flows)
 - **Purpose**: Primary script that extracts trade flows and creates environmental impact coefficients
 - **Key Features**: 
   - Handles imports, exports, and domestic flows based on config
@@ -123,13 +123,13 @@ and no download for that prior year already exists locally. The file lands in
 - **Processing time**: \~2-3 minutes per country
 
 ### 2. **trade_impact.py** - Aggregated Environmental Impacts
-- **Input**: `trade.csv` + `trade_factor_lg.csv` (domestic) or `trade_factor.csv` (others)
+- **Input**: `trade.csv` + `trade_factor-max.csv` (domestic) or `trade_factor.csv` (others)
 - **Output**: `trade_impact.csv`
 - **Purpose**: Comprehensive environmental impact summary per trade transaction
 - **Processing time**: \~10-15 seconds per country
 
 ### 3. **trade_resource.py** - Specialized Resource Analysis
-- **Input**: `trade_factor_lg.csv` or `trade_factor.csv`
+- **Input**: `trade_factor-max.csv` or `trade_factor.csv`
 - **Output**: 
   - `trade_employment.csv` - Employment impact analysis
   - `trade_resource.csv` - Resource use analysis (water, energy, land)
@@ -170,9 +170,9 @@ python trade_resource.py
 - **domestic**: Flows WITHIN the country (intra-country only)
 
 ### File Selection Logic
-- **Domestic flows**: Automatically uses `trade_factor_lg.csv` (all 721 factors) if available
+- **Domestic flows**: Automatically uses `trade_factor-max.csv` (all 721 factors) if available
 - **Import/Export flows**: Uses `trade_factor.csv` (aggregated flows, ~10 per industry) for performance
-- **Smart fallback**: If `_lg` version doesn't exist, falls back to standard version
+- **Smart fallback**: If the `-max` version doesn't exist, falls back to standard version
 
 ## Data Processing Patterns
 
@@ -205,7 +205,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
   government data (BLS for jobs, EIA for energy, USDA for land, USGS for water and minerals), not from
   Exiobase — so this is a scope match only, not a value match. See `bea/README.md`'s "Beyond GHGs" section.
 
-#### **trade_factor_lg.csv** (Large File - All 721 raw, unaggregated Factors) 
+#### **trade_factor-max.csv** (Large File - All 721 raw, unaggregated Factors) 
 - **Used for**: Domestic flows (intra-country trade only)
 - **Size**: ~1.5GB when created with `-lag` flag in trade.py
 - **Factor Coverage**: Complete environmental analysis (all extensions: air, water, land, materials, employment, energy)
@@ -215,7 +215,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 
 #### **Smart File Selection Logic**
 - **config_loader.py** automatically selects the appropriate file:
-  - **Domestic flows**: Uses `trade_factor_lg.csv` if available, falls back to `trade_factor.csv`
+  - **Domestic flows**: Uses `trade_factor-max.csv` if available, falls back to `trade_factor.csv`
   - **International flows**: Always uses `trade_factor.csv` for performance
 - **Processing scripts** (trade_impact.py, trade_resource.py) detect which file to use based on tradeflow type
 
@@ -234,7 +234,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 - **Auto-cleanup**: Progress file deleted after creating final summary
 
 ### Key Information Tracked
-- Trade factors file used (`trade_factor.csv` vs `trade_factor_lg.csv`)
+- Trade factors file used (`trade_factor.csv` vs `trade_factor-max.csv`)
 - Processing timestamps and duration
 - File generation summary
 - Environmental impact coverage details
@@ -246,7 +246,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 
 ### Environmental Impact Data  
 - **trade_factor.csv**: Aggregated flows for imports/exports (see EPA import factor reduction in bea/README.md)
-- **trade_factor_lg.csv**: All raw, unaggregated factors for domestic flows (721 factors)
+- **trade_factor-max.csv**: All raw, unaggregated factors for domestic flows (721 factors)
 - **trade_impact.csv**: Comprehensive impact summary per trade transaction
 - **trade_employment.csv**: Employment impact analysis
 - **trade_resource.csv**: Resource use analysis (water, energy, land)
@@ -268,7 +268,7 @@ The project uses a dual-file approach to balance comprehensive environmental cov
 
 - **Domestic flows**: All 721 factors (comprehensive analysis feasible)
 - **International flows**: aggregated flows, ~10 per industry (performance-optimized)
-- **Smart file selection**: Automatic `_lg` vs standard file detection
+- **Smart file selection**: Automatic `-max` vs standard file detection
 - **Batch processing**: Multi-level timeout protection with automatic progression
 - **Memory management**: Chunked processing for large datasets
 - **Resume functionality**: Automatically skips already completed countries
@@ -351,7 +351,7 @@ in a sector's own inputs, via the Leontief inverse) is loaded directly from the 
 via pymrio — no intermediate CSVs are read. The default file uses the fixed aggregate factor_ids
 (901-910, see exiobase_factors.py) rather than raw per-stressor factor_ids: `air_emissions`
 collapses to EPA's own 5-flow GHG list, the other five extensions each collapse to a single
-flow scoped to match the corresponding USEEIO indicator's coverage. `interstate_factor_lg.csv` (when `use_partial_factors_interstate: false`)
+flow scoped to match the corresponding USEEIO indicator's coverage. `interstate_factor-max.csv` (when `use_partial_factors_interstate: false`)
 instead uses every raw per-stressor factor_id (1-721, assigned by row position across extensions
 in order: `air_emissions`, `employment`, `energy`, `land`, `material`, `water`, same ordering as
 `factor.csv`), filtered by `min_impact_threshold` only, no top-N cap. If the zip is unavailable,
@@ -402,7 +402,7 @@ finishes. `main.py` checks that `exiobase/India_data/` exists upfront when `IN` 
 
 #### **Memory Errors (Critical Issue)**
 - **Symptom**: `"FATAL ERROR: v8::ToLocalChecked Empty MaybeLocal"` after ~10 minutes
-- **Cause**: `trade_factor_lg.csv` files (~1.5GB) exceed Node.js memory limits
+- **Cause**: `trade_factor-max.csv` files (~1.5GB) exceed Node.js memory limits
 - **Solution**: Use default `python trade.py` (not `python trade.py -lag`)
 - **Prevention**: Avoid large factor files for international trade processing
 

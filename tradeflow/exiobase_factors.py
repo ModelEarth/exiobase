@@ -1,7 +1,7 @@
 """
 Shared environmental-factor aggregation used by both the international
 (trade.py) and US state-level (bea/main_trade_analyzer.py) pipelines for
-the default (non "_lg") trade_factor.csv / interstate_factor.csv files.
+the default (non "-max") trade_factor.csv / interstate_factor.csv files.
 
 Replaces the earlier "top N raw stressors ranked by |M-matrix coefficient|
 magnitude" selection with EPA USEEIO's own approach, for the one extension
@@ -65,7 +65,7 @@ EPA_GHG_FLOWS = {
 
 # Fixed factor_id block for every aggregated flow this module produces,
 # separate from the 1-721 raw per-stressor IDs in factor.csv (still used by
-# trade_factor_lg.csv/interstate_factor_lg.csv) so both can coexist in the
+# trade_factor-max.csv/interstate_factor-max.csv) so both can coexist in the
 # same factor.csv without collision, regardless of a given year's exact
 # Exiobase stressor count.
 AGGREGATE_FACTOR_IDS = {

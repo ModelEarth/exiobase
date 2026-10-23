@@ -242,7 +242,7 @@ def get_file_path(config, file_key, tradeflow_type=None):
     if file_key == 'trade_factor':
         current_tradeflow = tradeflow_type or config.get('TRADEFLOW', '')
         if current_tradeflow.lower() == 'domestic':
-            # For domestic flows, check if _lg version exists, otherwise use regular
+            # For domestic flows, check if -max version exists, otherwise use regular
             lg_path = f"{folder}/{config['FILES']['trade_factor_domestic']}"
             regular_path = f"{folder}/{config['FILES']['trade_factor']}"
             

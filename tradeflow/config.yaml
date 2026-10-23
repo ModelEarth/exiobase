@@ -93,9 +93,9 @@ FILES:
   sector_industry: sector_industry.csv
   industryflow: trade.csv
   trade_factor: trade_factor.csv
-  trade_factor_domestic: trade_factor_lg.csv
+  trade_factor_domestic: trade_factor-max.csv
   interstate_factor: interstate_factor.csv
-  interstate_factor_lg: interstate_factor_lg.csv
+  interstate_factor_max: interstate_factor-max.csv
   trade_impact: trade_impact.csv
   trade_resource: trade_resource.csv
   trade_material: trade_material.csv

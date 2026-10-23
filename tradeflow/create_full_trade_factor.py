@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Create trade_factor.csv with environmental impact coefficients
-For domestic flows: creates both trade_factor.csv and trade_factor_lg.csv
+For domestic flows: creates both trade_factor.csv and trade_factor-max.csv
 For imports/exports: creates only trade_factor.csv
 """
 
@@ -73,7 +73,7 @@ def finalize_run_note(config, trade_factor_file_used):
 
 ## Notes
 
-- **Domestic flows** use trade_factor_lg.csv (all 721 factors) for comprehensive analysis
+- **Domestic flows** use trade_factor-max.csv (all 721 factors) for comprehensive analysis
 - **Import/Export flows** use trade_factor.csv (selected factors) for performance
 - This run completed successfully with full environmental impact coverage
 """
@@ -88,7 +88,7 @@ def finalize_run_note(config, trade_factor_file_used):
 def create_trade_factor():
     """
     Create trade_factor files based on trade flow type
-    Domestic: creates both trade_factor.csv and trade_factor_lg.csv
+    Domestic: creates both trade_factor.csv and trade_factor-max.csv
     Others: creates only trade_factor.csv
     """
     config = load_config()

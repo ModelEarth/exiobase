@@ -376,7 +376,7 @@ story.append(two_col_table([
     ["<b>trade.csv</b>", "One row per bilateral industry-pair flow for a given country and "
                          "direction. Columns: trade_id, year, region1, region2, industry1, "
                          "industry2, amount (M EUR)."],
-    ["<b>trade_factor.csv</b> / <b>trade_factor_lg.csv</b>",
+    ["<b>trade_factor.csv</b> / <b>trade_factor-max.csv</b>",
      "One row per (trade, factor) pair. Columns: trade_id, factor_id, level. "
      "The level is a physical quantity (kg, persons, TJ, km&sup2;, kt, Mm&sup3;)."],
     ["<b>trade_impact / resource / material / employment</b>",
@@ -516,7 +516,7 @@ story.append(code_block(
     "  industries: industry.csv\n"
     "  industryflow: trade.csv\n"
     "  trade_factor: trade_factor.csv\n"
-    "  trade_factor_domestic: trade_factor_lg.csv\n"
+    "  trade_factor_domestic: trade_factor-max.csv\n"
     "  trade_impact: trade_impact.csv\n"
     "  trade_resource: trade_resource.csv\n"
     "  ...\n"
@@ -562,7 +562,7 @@ story += section_header("Smart file selection")
 story.append(P(
     "<font face='Courier'>get_file_path(config, 'trade_factor')</font> is more clever than it looks. "
     "For the domestic flow direction it first checks whether a "
-    "<font face='Courier'>_lg.csv</font> file exists and prefers that over the standard version; "
+    "<font face='Courier'>-max.csv</font> file exists and prefers that over the standard version; "
     "for imports and exports it always uses the small file. This is where the "
     "<i>&lsquo;120 for international, 721 for domestic&rsquo;</i> policy is enforced."
 ))
@@ -627,7 +627,7 @@ story += bullets([
 story.append(P(
     "The result is written to <font face='Courier'>trade_factor.csv</font>. "
     "With <font face='Courier'>-lag</font>, the filter is skipped and the full 721-factor "
-    "join is written to <font face='Courier'>trade_factor_lg.csv</font> instead "
+    "join is written to <font face='Courier'>trade_factor-max.csv</font> instead "
     "(~1.5 GB, with a warning about downstream Node.js memory errors)."
 ))
 
@@ -672,7 +672,7 @@ story += section_header("What it reads")
 story += bullets([
     "<font face='Courier'>trade.csv</font> &mdash; the trade flows from "
     "<font face='Courier'>trade.py</font>.",
-    "<font face='Courier'>trade_factor.csv</font> or <font face='Courier'>trade_factor_lg.csv</font> "
+    "<font face='Courier'>trade_factor.csv</font> or <font face='Courier'>trade_factor-max.csv</font> "
     "&mdash; whichever one <font face='Courier'>get_file_path</font> selects for this flow direction.",
     "<font face='Courier'>factor.csv</font> &mdash; for the unit, extension, and stressor columns.",
 ])
@@ -774,7 +774,7 @@ story.append(P(
     "(country, flow_direction) tuple invokes the three processing scripts in order:"
 ))
 story.append(code_block(
-    "python trade.py          # produces trade.csv + trade_factor(_lg).csv\n"
+    "python trade.py          # produces trade.csv + trade_factor(-max).csv\n"
     "python trade_impact.py   # produces trade_impact.csv\n"
     "python trade_resource.py # produces trade_resource.csv, _material.csv, _employment.csv"
 ))
@@ -911,12 +911,12 @@ story.append(two_col_table([
     ["File", "When generated"],
     ["<b>trade_factor.csv</b>", "Always for imports and exports. Also for domestic if "
                                  "<font face='Courier'>use_partial_factors_domestic</font> is true."],
-    ["<b>trade_factor_lg.csv</b>", "Only when <font face='Courier'>-lag</font> flag is passed, "
+    ["<b>trade_factor-max.csv</b>", "Only when <font face='Courier'>-lag</font> flag is passed, "
                                      "or when <font face='Courier'>use_partial_factors_domestic: false</font>."],
     ["<b>interstate_factor.csv</b>", "US BEA state-to-state. Default is 50 selected factors "
                                        "(not 120; smaller because the row count is multiplied by "
                                        "state-pair combinatorics)."],
-    ["<b>interstate_factor_lg.csv</b>", "When <font face='Courier'>use_partial_factors_interstate: false</font>."],
+    ["<b>interstate_factor-max.csv</b>", "When <font face='Courier'>use_partial_factors_interstate: false</font>."],
 ]))
 
 story += section_header("The trade-off")
@@ -925,7 +925,7 @@ story.append(P(
     "but can hide <b>specific stressors a user cares about</b>. If someone asks "
     "&lsquo;what is the embodied methane in cement imports?&rsquo; and methane did not make "
     "the top-120 for that industry, the answer in <font face='Courier'>trade_factor.csv</font> "
-    "will be 0 &mdash; silently. The <font face='Courier'>_lg</font> file is the escape hatch, "
+    "will be 0 &mdash; silently. The <font face='Courier'>-max</font> file is the escape hatch, "
     "but requires explicit opt-in and a willingness to deal with multi-gigabyte files."
 ))
 
@@ -960,7 +960,7 @@ story.append(code_block(
     "      ...\n"
     "    domestic/\n"
     "      trade.csv                                # 21,518 rows\n"
-    "      trade_factor.csv (or trade_factor_lg.csv)\n"
+    "      trade_factor.csv (or trade_factor-max.csv)\n"
     "      ..."
 ))
 
@@ -1237,7 +1237,7 @@ story += section_header("Memory errors in Node.js consumers")
 story.append(P(
     "<i>FATAL ERROR: v8::ToLocalChecked Empty MaybeLocal</i> after about 10 minutes is "
     "the signature of a Node consumer trying to parse "
-    "<font face='Courier'>trade_factor_lg.csv</font> (~1.5 GB). The fix is to use the "
+    "<font face='Courier'>trade_factor-max.csv</font> (~1.5 GB). The fix is to use the "
     "default 120-factor file, not the <font face='Courier'>-lag</font> version, for the "
     "flow being consumed. If domestic analysis <i>needs</i> the full 721 factors, process "
     "it in chunks or move to SQL."

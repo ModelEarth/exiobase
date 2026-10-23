@@ -16,6 +16,18 @@ import re
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from exiobase_factors import aggregate_coefficients
 
+# BEA Sector (sector.csv) to the broad category whose GDP by state allocates a flow.
+# Sectors not listed (trade, information, finance and other services) are services.
+SECTOR_ALLOCATION_CATEGORY = {
+    '11': 'agriculture',
+    '21': 'mining',
+    '22': 'utilities',
+    '23': 'construction',
+    '31ND': 'manufacturing',
+    '33DG': 'manufacturing',
+    '48TW': 'transportation',
+}
+
 class StateTradeAnalyzer:
     def __init__(self, config):
         self.config = config
@@ -150,19 +162,40 @@ class StateTradeAnalyzer:
                 print(f"    industry.csv missing columns {required - set(industry_df.columns)} at {path}")
                 continue
 
+            # BEA Sector from sector_industry.csv beside industry.csv (the Sector with the
+            # largest weight), else a match on the industry's category and name
+            sector_by_id = self._load_industry_sectors(path.parent / 'sector_industry.csv')
             category_by_id = {}
             for _, row in industry_df.iterrows():
                 industry_id = str(row['industry_id']).strip().upper()
-                category_by_id[industry_id] = self._normalize_industry_category(
-                    row.get('category', ''),
-                    row.get('name', '')
+                sector = sector_by_id.get(industry_id)
+                category_by_id[industry_id] = (
+                    SECTOR_ALLOCATION_CATEGORY.get(sector, 'services') if sector
+                    else self._normalize_industry_category(row.get('category', ''), row.get('name', ''))
                 )
 
-            print(f"    Loaded {len(category_by_id)} industry categories from {path}")
+            from_sectors = sum(1 for industry_id in category_by_id if industry_id in sector_by_id)
+            print(f"    Loaded {len(category_by_id)} industry categories from {path} "
+                  f"({from_sectors} from sector_industry.csv)")
             return category_by_id
 
         print("    industry.csv not found - falling back to NAICS-prefix industry categorization")
         return {}
+
+    def _load_industry_sectors(self, path):
+        """Each industry's BEA Sector with the largest weight in sector_industry.csv."""
+        if not path.exists():
+            return {}
+        try:
+            sector_df = pd.read_csv(path, dtype={'sector_id': str, 'industry_id': str})
+        except Exception as exc:
+            print(f"    Could not load industry sectors from {path}: {exc}")
+            return {}
+        if not {'sector_id', 'industry_id', 'weight'}.issubset(sector_df.columns):
+            return {}
+        sector_df['industry_id'] = sector_df['industry_id'].str.strip().str.upper()
+        top = sector_df.sort_values('weight', ascending=False).drop_duplicates('industry_id')
+        return dict(zip(top['industry_id'], top['sector_id'].str.strip()))
 
     def _normalize_industry_category(self, category, name=''):
         """Map detailed Exiobase categories to the broad state-allocation buckets."""
@@ -262,7 +295,7 @@ class StateTradeAnalyzer:
 
         threshold = self.config.get('PROCESSING', {}).get('min_impact_threshold', 0.001)
 
-        satellite_data = {}      # industry_id → list of (factor_id, coefficient), all raw factors meeting threshold — feeds interstate_factor_lg.csv only
+        satellite_data = {}      # industry_id → list of (factor_id, coefficient), all raw factors meeting threshold — feeds interstate_factor-max.csv only
         satellite_aggregate = {}  # industry_id → list of (factor_id, coefficient), EPA-style aggregated flows — feeds the default interstate_factor.csv (see exiobase_factors.py)
 
         for ext_name in extensions:
