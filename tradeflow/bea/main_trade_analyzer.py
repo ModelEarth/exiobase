@@ -1,8 +1,8 @@
 """
 State Trade Analyzer for US Trade Flow Disaggregation
 
-Provides state-level trade flow disaggregation, economic impact calculations,
-and employment multipliers for comprehensive US trade analysis.
+Splits national US-to-US trade flows among state pairs with BEA GDP-by-state
+weights, and derives state export and import shares.
 """
 
 import sys
@@ -35,34 +35,12 @@ class StateTradeAnalyzer:
         
         # Load state reference data
         self.state_codes = self._load_state_codes()
-        self.employment_multipliers = self._load_employment_multipliers()
-        self.industry_state_mapping = self._load_industry_state_data()
         self.industry_category_by_id = self._load_industry_categories()
-        self.default_producing_states = ['CA', 'TX', 'NY', 'IL', 'FL', 'OH', 'PA', 'MI']
-        self.default_consuming_states = [
-            'CA', 'TX', 'NY', 'FL', 'IL', 'PA', 'OH', 'MI', 'GA', 'NC',
-            'NJ', 'VA', 'WA', 'AZ', 'MA', 'IN', 'TN', 'MO', 'MD', 'WI'
-        ]
-        self.producing_states_by_industry = {
-            'agriculture': ['CA', 'TX', 'FL', 'IL', 'WA', 'NC', 'MI', 'OH'],
-            'manufacturing': ['CA', 'TX', 'IL', 'MI', 'OH', 'PA', 'NC', 'NY'],
-            'mining': ['TX', 'PA', 'OH', 'OK', 'LA', 'ND', 'WY', 'CA'],
-            'construction': ['CA', 'TX', 'FL', 'NY', 'IL', 'PA', 'GA', 'NC'],
-            'utilities': ['TX', 'CA', 'PA', 'IL', 'OH', 'NY', 'FL', 'GA'],
-            'transportation': ['CA', 'TX', 'IL', 'GA', 'NY', 'FL', 'OH', 'WA'],
-            'services': ['CA', 'TX', 'NY', 'FL', 'IL', 'PA', 'GA', 'NC'],
-        }
         self._bea_allocation_source_id = None
         self._bea_allocation_weight_lookup = {}
         self._bea_allocation_ranked_states = {}
         
-        # Economic impact coefficients
-        self.direct_job_coefficient = 1.0
-        self.indirect_job_multiplier = 0.7
-        self.induced_job_multiplier = 0.5
-        self.output_multiplier = 2.1
-        self.tax_revenue_rate = 0.12
-        
+
     def _load_state_codes(self):
         """Load US state codes and names"""
         # Standard US state codes
@@ -87,44 +65,6 @@ class StateTradeAnalyzer:
             for code, name in states.items()
         ])
     
-    def _load_employment_multipliers(self):
-        """Load industry-specific employment multipliers"""
-        # Industry employment multipliers (simplified - in practice would come from BEA data)
-        multipliers = {
-            'manufacturing': {'direct': 1.0, 'indirect': 0.8, 'induced': 0.6},
-            'agriculture': {'direct': 1.0, 'indirect': 0.5, 'induced': 0.4},
-            'services': {'direct': 1.0, 'indirect': 0.6, 'induced': 0.5},
-            'mining': {'direct': 1.0, 'indirect': 0.9, 'induced': 0.7},
-            'construction': {'direct': 1.0, 'indirect': 0.7, 'induced': 0.5},
-            'utilities': {'direct': 1.0, 'indirect': 0.4, 'induced': 0.3},
-            'transportation': {'direct': 1.0, 'indirect': 0.6, 'induced': 0.5},
-            'default': {'direct': 1.0, 'indirect': 0.7, 'induced': 0.5}
-        }
-        
-        return multipliers
-    
-    def _load_industry_state_data(self):
-        """Load industry-state mapping and specialization data"""
-        # State specialization indices (simplified example)
-        # In practice, this would come from BEA regional data
-        specializations = {}
-        
-        # Major state specializations
-        state_specializations = {
-            'CA': ['technology', 'agriculture', 'entertainment'],
-            'TX': ['energy', 'chemicals', 'agriculture'], 
-            'NY': ['finance', 'services', 'manufacturing'],
-            'IL': ['manufacturing', 'agriculture', 'transportation'],
-            'FL': ['agriculture', 'tourism', 'aerospace'],
-            'WA': ['technology', 'aerospace', 'agriculture'],
-            'MI': ['automotive', 'manufacturing', 'agriculture'],
-            'OH': ['manufacturing', 'agriculture', 'services'],
-            'PA': ['manufacturing', 'energy', 'agriculture'],
-            'NC': ['manufacturing', 'agriculture', 'technology']
-        }
-        
-        return state_specializations
-
     def _load_industry_categories(self):
         """Load Exiobase 5-character industry IDs from industry.csv."""
         year = self.config.get('YEAR')
@@ -412,10 +352,6 @@ class StateTradeAnalyzer:
         # Concatenate efficiently
         state_df = pd.concat(chunks, ignore_index=True, copy=False)
 
-        has_satellite = bool(getattr(self, '_satellite_data', None))
-        if not state_df.empty and not has_satellite:
-            state_df = self._calculate_employment_impacts(state_df)
-
         print(f"      ✅ Created {len(state_df)} state-to-state flow records")
         return state_df
     
@@ -481,7 +417,6 @@ class StateTradeAnalyzer:
                 'state_industry_code': industry,
                 'level': level,
                 'flow_type': 'intra_state' if origin_state == dest_state else 'inter_state',
-                'employment_impact': 0.0,
                 '_origin_state': origin_state,
                 '_destination_state': dest_state,
                 '_industry1': industry_id,
@@ -597,177 +532,21 @@ class StateTradeAnalyzer:
         )
 
     def _get_producing_states(self, industry, bea_data=None):
-        """Get states that are major producers in this industry"""
-        bea_states = self._get_bea_ranked_states(industry, 'origin', bea_data)
-        if bea_states:
-            return bea_states[:8]
+        """The 8 states with the largest BEA origin weights for this category"""
+        return self._get_bea_ranked_states(industry, 'origin', bea_data)[:8]
 
-        producing_states = list(self.producing_states_by_industry.get(
-            industry,
-            self.default_producing_states
-        ))
-
-        # Add states from the placeholder specialization map when they match the
-        # broad category, but keep output cardinality bounded by the base list.
-        for state, specializations in self.industry_state_mapping.items():
-            if industry in specializations and state not in producing_states:
-                producing_states.append(state)
-
-        if not producing_states:
-            producing_states = self.default_producing_states
-
-        return producing_states[:8]
-    
     def _get_consuming_states(self, industry, bea_data=None):
-        """Get states that are major consumers in this industry"""
-        bea_states = self._get_bea_ranked_states(industry, 'destination', bea_data)
-        if bea_states:
-            return bea_states[:20]
+        """The 20 states with the largest BEA destination weights for this category"""
+        return self._get_bea_ranked_states(industry, 'destination', bea_data)[:20]
 
-        return self.default_consuming_states
-    
     def _calculate_state_flow_share(self, origin, destination, industry1_cat, industry2_cat, bea_data):
-        """Calculate the share of flow between two states"""
+        """Origin weight of the supplying category times destination weight of the buying one"""
         origin_weight = self._get_bea_weight(industry1_cat, 'origin', origin, bea_data)
         dest_weight = self._get_bea_weight(industry2_cat, 'destination', destination, bea_data)
-        if origin_weight is not None and dest_weight is not None:
-            return origin_weight * dest_weight
+        if origin_weight is None or dest_weight is None:
+            return 0.0
+        return origin_weight * dest_weight
 
-        # Base share using population/GDP proxies
-        base_shares = {
-            'CA': 0.12, 'TX': 0.09, 'FL': 0.06, 'NY': 0.06, 'PA': 0.04,
-            'IL': 0.04, 'OH': 0.04, 'GA': 0.03, 'NC': 0.03, 'MI': 0.03
-        }
-
-        origin_weight = base_shares.get(origin, 0.01)
-        dest_weight = base_shares.get(destination, 0.01)
-
-        # Apply industry specialization modifier
-        specialization_bonus = 1.0
-        if origin in self.industry_state_mapping:
-            if industry1_cat in self.industry_state_mapping[origin]:
-                specialization_bonus = 1.5
-
-        # Calculate flow share (simplified allocation)
-        flow_share = (origin_weight * dest_weight * specialization_bonus) / 100
-
-        return min(flow_share, 0.1)  # Cap at 10% of total flow
-    
-    def _calculate_employment_impacts(self, state_flows_df):
-        """Calculate employment impacts for state flows"""
-        if state_flows_df.empty:
-            return state_flows_df
-        
-        print("    👥 Calculating employment impacts...")
-        
-        state_flows_df['employment_impact'] = state_flows_df['employment_impact'].astype(float)
-
-        for index, row in state_flows_df.iterrows():
-            industry = row['state_industry_code']
-            level = row['level']
-            
-            # Get employment multipliers for industry
-            multipliers = self.employment_multipliers.get(industry, 
-                                                        self.employment_multipliers['default'])
-            
-            # Calculate employment impact (jobs per million dollars)
-            jobs_per_million = 15.0  # Base jobs per million dollars (varies by industry)
-            
-            if industry == 'manufacturing':
-                jobs_per_million = 12.0
-            elif industry == 'agriculture':
-                jobs_per_million = 20.0
-            elif industry == 'services':
-                jobs_per_million = 18.0
-            elif industry == 'construction':
-                jobs_per_million = 25.0
-            
-            # Calculate total employment impact
-            employment_impact = (level / 1000000) * jobs_per_million
-            state_flows_df.loc[index, 'employment_impact'] = employment_impact
-        
-        return state_flows_df
-    
-    def calculate_state_industry_impacts(self, state_flows_df):
-        """Calculate comprehensive state-industry economic impacts"""
-        if state_flows_df.empty:
-            return pd.DataFrame()
-        
-        print("    📊 Calculating state industry impacts...")
-        
-        df = state_flows_df.copy()
-
-        # Normalize amount column
-        if 'amount' in df.columns and 'level' not in df.columns:
-            df = df.rename(columns={'amount': 'level'})
-
-        if 'level' not in df.columns:
-            raise ValueError("state_flows_df must contain either 'level' or 'amount'")
-
-        if 'employment_impact' not in df.columns:
-            df['employment_impact'] = 0.0
-
-        if 'economic_multiplier' not in df.columns:
-            df['economic_multiplier'] = np.nan
-
-        if 'tax_rate' not in df.columns:
-            df['tax_rate'] = np.nan
-
-        # Fill row-level fallback values
-        df['economic_multiplier'] = df['economic_multiplier'].fillna(self.output_multiplier)
-        df.loc[df['economic_multiplier'] <= 0, 'economic_multiplier'] = self.output_multiplier
-
-        df['tax_rate'] = df['tax_rate'].fillna(self.tax_revenue_rate)
-        df.loc[df['tax_rate'] < 0, 'tax_rate'] = self.tax_revenue_rate
-
-        # Compute row-level impacts FIRST
-        df['row_total_output_impact'] = df['level'] * df['economic_multiplier']
-        df['row_tax_revenue_impact'] = df['row_total_output_impact'] * df['tax_rate']
-
-        # Aggregate flows by destination state and industry
-        state_col = '_origin_state' if '_origin_state' in df.columns else '_destination_state'
-
-        state_industry_agg = df.groupby(
-            [state_col, 'state_industry_code'],
-            as_index=False
-        ).agg({
-            'level': 'sum',
-            'employment_impact': 'sum',
-            'row_total_output_impact': 'sum',
-            'row_tax_revenue_impact': 'sum'
-        })
-
-        impacts = []
-
-        for _, row in state_industry_agg.iterrows():
-            state = row[state_col]
-            industry = row['state_industry_code']
-            direct_jobs = float(row['employment_impact'])
-            
-            # Get multipliers
-            multipliers = self.employment_multipliers.get(industry,
-                                                        self.employment_multipliers['default'])
-            
-            # Calculate indirect and induced employment
-            indirect_jobs = direct_jobs * multipliers['indirect']
-            induced_jobs = direct_jobs * multipliers['induced']
-            
-            impacts.append({
-                'region1': f'US-{state}',
-		'region2': f'US-{state}',
-                'industry_code': industry,
-                'direct_jobs': direct_jobs,
-                'indirect_jobs': indirect_jobs, 
-                'induced_jobs': induced_jobs,
-                'total_output_impact': float(row['row_total_output_impact']),
-                'tax_revenue_impact': float(row['row_tax_revenue_impact'])
-            })
-        
-        impacts_df = pd.DataFrame(impacts)
-        print(f"      ✅ Calculated impacts for {len(impacts_df)} state-industry combinations")
-        
-        return impacts_df
-    
     def analyze_export_competitiveness(self, interstate_df):
         """
         State-level export competitiveness from interstate.csv.
@@ -883,25 +662,5 @@ class StateTradeAnalyzer:
         print("  📋 Creating state reference data...")
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Save state codes
         self.state_codes.to_csv(output_path / 'state_codes.csv', index=False)
-        
-        # Save employment multipliers
-        multipliers_df = pd.DataFrame([
-            {'industry': industry, 'direct': mult['direct'], 
-             'indirect': mult['indirect'], 'induced': mult['induced']}
-            for industry, mult in self.employment_multipliers.items()
-        ])
-        multipliers_df.to_csv(output_path / 'employment_multipliers.csv', index=False)
-        
-        # Save state specializations
-        specializations = []
-        for state, industries in self.industry_state_mapping.items():
-            for industry in industries:
-                specializations.append({'state_code': state, 'specialization': industry})
-        
-        if specializations:
-            spec_df = pd.DataFrame(specializations)
-            spec_df.to_csv(output_path / 'state_specializations.csv', index=False)
-        
-        print("    ✅ Created state reference data files")
+        print("    ✅ Created state_codes.csv")

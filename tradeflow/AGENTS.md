@@ -342,7 +342,7 @@ so a missing key is caught before any trade processing starts rather than after.
 ### Key outputs
 - `year/{year}/US/domestic/interstate.csv`
 - `year/{year}/US/domestic/interstate_factor.csv` — includes `factor_id` from Exiobase's M matrix (total multipliers); `coefficient` is not stored (derivable as `level / interstate.amount`)
-- `year/{year}/US/domestic/state_industry_impacts.csv`
+- `year/{year}/US/domestic/category_state.csv`, `trade-us.csv` and `industry_category.csv`
 - `year/{year}/US/bea-report.md`
 
 ### factor_id in interstate_factor.csv

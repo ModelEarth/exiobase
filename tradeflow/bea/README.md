@@ -219,8 +219,6 @@ Orchestrates all three tradeflows through a five-phase pipeline: base Exiobase d
 - `year/{year}/US/domestic/export_competitiveness_state.csv` and `import_dependency_state.csv` — per-`interstate_id` export and import shares (plus `-lg` siblings)
 - `year/{year}/US/domestic/interstate_factor.csv` — real per-factor state-level flows (satellite data available)
 - `year/{year}/US/domestic/interstate_factor-max.csv` — same as above with all 721 factors (generated when `use_partial_factors_interstate: false` in `config.yaml`)
-- `year/{year}/US/domestic/interstate_estimate.csv` — no-satellite-fallback leftover fields (satellite data unavailable); mutually exclusive with `interstate_factor.csv` per flow
-- `year/{year}/US/domestic/trade_price_indices.csv` — trade price indices (currently empty; see [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md))
 - `year/{year}/US/bea-report.md` — validation and processing summary report
 
 **Note:** interstate factor coefficient (from Exiobase's M matrix — total, direct + upstream) is not stored. coefficient can be derived by trade.amount divided by trade_factor.level
@@ -293,13 +291,13 @@ Don't confuse it with `industry_code` (BEA Summary) just because both contain th
 
 **Matching the USEEIO Excel sheets without a `BEA_API_KEY`:** `commodity_code` and `industry_code`
 above don't need one — they're a pure local-file join through the two concordance CSVs. The only
-things a missing key actually affects are `economic_multiplier` (falls back to `1.0`) and, without
-also passing `--use-bea-placeholder`, domestic processing being skipped entirely (see
+things a missing key actually affects are `economic_multiplier` (falls back to `1.0`) and the state
+split, which is skipped without BEA state weights from the API or its cache (see
 `BEA_API_KEY_MISSING_NOTICE` in `bea/main.py` for the exact tradeoffs — `bea/main.py` now prints
 this at both the start and end of a run when no key is found, and offers to prompt for one
 interactively instead of hard-exiting like it used to).
 
-`interstate_id` is the `PRIMARY KEY` of the `interstate` table and the join target for `interstate_factor`/`interstate_estimate`. In `interstate-lg.csv` it's a composite string key (`{year}-{trade_id}-US-{state1}-US-{state2}-{state_industry_code}`), since one `trade_id` fans out to up to 160 state-pair rows. In the Sector-level `interstate.csv` it's an integer (1, 2, 3, …) assigned when rows are summed to Sector level. `trade_id` is kept on `interstate` (not on `interstate_factor`/`interstate_estimate`) as the path back to the originating `trade` row (`trade.amount`, `trade.country`, `trade.flow_type`) — navigate as `interstate_factor → interstate → trade`. In `interstate-lg.csv` that's the row's own flow. Each `interstate.csv` row sums many US→US trade rows and keeps the first one's `trade_id`. It still ties the row to the US→US flows, but not to its full amount or industry pairs (see [notes.md](notes.md#the-trade_id-link)). There is no `year` column — one database per year makes it redundant.
+`interstate_id` is the `PRIMARY KEY` of the `interstate` table and the join target for `interstate_factor`. In `interstate-lg.csv` it's a composite string key (`{year}-{trade_id}-US-{state1}-US-{state2}-{state_industry_code}`), since one `trade_id` fans out to up to 160 state-pair rows. In the Sector-level `interstate.csv` it's an integer (1, 2, 3, …) assigned when rows are summed to Sector level. `trade_id` is kept on `interstate` (not on `interstate_factor`/`interstate_estimate`) as the path back to the originating `trade` row (`trade.amount`, `trade.country`, `trade.flow_type`) — navigate as `interstate_factor → interstate → trade`. In `interstate-lg.csv` that's the row's own flow. Each `interstate.csv` row sums many US→US trade rows and keeps the first one's `trade_id`. It still ties the row to the US→US flows, but not to its full amount or industry pairs (see [notes.md](notes.md#the-trade_id-link)). There is no `year` column — one database per year makes it redundant.
 
 **interstate.amount** is in million Euros (M EUR), consistent with `trade.amount` — both are sourced from the Exiobase Z matrix.
 
@@ -334,7 +332,7 @@ In some SQL installs, we'll place state data in the "trade" table with multi-cou
 
 #### interstate_factor - renamed from state_trade_flows.csv (State-Level Analysis)
 
-`state_trade_flows.csv` was removed from trade-data on 2026-09-19 (commit `ef96b7f`). The [interstate trade map](../../../profile/trade/map/state.html) now builds its flows from `trade-us.csv`, `industry_category.csv` and `category_state.csv`. The Sankey charts (`profile/charts/sankey/state.html`) still use the June 2026 snapshot in `profile/state-trade-data.js`.
+`state_trade_flows.csv` was removed from trade-data on 2026-09-19 (commit `ef96b7f`). The [interstate trade map](../../../profile/trade/map/state.html) now builds its flows from `trade-us.csv`, `industry_category.csv` and `category_state.csv`. So does the state Sankey (`profile/charts/sankey/state.html`); both use `profile/js/state-flows.js`. The June 2026 snapshot that the pages used to embed, `profile/state-trade-data.js`, was removed on 2026-10-23.
 interstate_id, factor_id, level, flow_type
 
 Real per-factor rows only — generated when Exiobase satellite data is available. `origin_state` and `destination_state` are not separate columns here — they are encoded in `interstate_id` and available via `interstate.state1` / `interstate.state2`.
@@ -353,11 +351,7 @@ Each Exiobase sector has environmental coefficients for up to 721 raw stressors 
 
 See [EPA import factor reduction](#epa-import-factor-reduction) for how this selection compares to EPA's USEEIO aggregation approach.
 
-## interstate_estimate
-
-interstate_id, employment_impact, flow_type
-
-Generated instead of `interstate_factor.csv` when Exiobase satellite data is **not** available for a given run — the two files are mutually exclusive per flow (a given `interstate_id` produces rows in one or the other, never both). It carries only the no-satellite fallback's real leftover fields: `employment_impact` (from BEA regional employment/output weights, not Exiobase) and `flow_type` (`inter_state`/`intra_state`). The fallback source data's `factor_id`/`coefficient` are fixed placeholders (`-1`/`1.0`, never recalculated against real Exiobase coefficients), so they are deliberately excluded rather than stored as meaningless constants — this is also why `interstate_estimate` is a separate table from `interstate_factor` rather than a shared one with nullable factor columns: a `-1` `factor_id` isn't a valid `factor.factor_id` and would need to be filtered out on every read.
+Without Exiobase satellite data, `interstate.csv` is still written but `interstate_factor.csv` isn't. Until 2026-10-23 such a run wrote `interstate_estimate.csv` (`interstate_id`, `employment_impact`, `flow_type`) instead. Its `employment_impact` came from hard-coded jobs per million dollars, so it was removed with the other placeholder tables (see [notes.md](notes.md)).
 
 ## category_state
 
@@ -462,13 +456,6 @@ LIMIT 10;
 
 Tested in SQLite against the 2019 CSV files: `trade_us` matches `trade-us.csv` to its 6 significant digits. Georgia's textile purchases total €700.6M ($784M at the 2019 rate), the same as the product label.
 
-## trade_price_indices
-
-#### [trade_price_indices.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/trade_price_indices.csv) (Economic Indicators)
-trade_id, import_price_index, export_price_index, exchange_rate, price_year, currency_adjustment_factor
-
-Open question (tracked in [PLAN.md](https://github.com/ModelEarth/exiobase/blob/main/tradeflow/PLAN.md)): why is the table above empty?
-
 ## industry / sector / sector_industry (created by international tradeflow/main.py)
 
 #### [industry.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/industry.csv) (raw Exiobase industry names, ~200 rows)
@@ -521,13 +508,14 @@ trade_id, industry_exports_total, destination_share, export_intensity, destinati
 #### [import_dependency.csv](https://raw.githubusercontent.com/ModelEarth/trade-data/refs/heads/main/year/2019/US/imports/import_dependency.csv) (Import Analysis, generated by trade_competitiveness.py)
 trade_id, industry_imports_total, source_share, import_intensity, supplier_count, import_concentration_hhi
 
-## state_industry_impacts
+## Removed placeholder tables
 
-#### [state_industry_impacts.csv](https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/state_industry_impacts.csv) (State Economic Impact)
+Until 2026-10-23 `bea/main.py` also wrote these to `domestic/`. Their values were placeholders, not BEA data, so the code and the 2018–2024 files were removed:
 
-region1 (US-CA), region2, industry_code, direct_jobs, indirect_jobs, induced_jobs, total_output_impact, tax_revenue_impact
-
-The job columns are 0 for every 2019 row, and `tax_revenue_impact` is a flat 12% of `total_output_impact` (`tax_revenue_rate` in `main_trade_analyzer.py`): placeholders, not BEA data.
+- `state_industry_impacts.csv`: zero jobs, output impact at a flat multiplier and tax revenue at a flat 12% of output
+- `employment_multipliers.csv`: hard-coded direct, indirect and induced multipliers per category
+- `state_specializations.csv`: a hard-coded list of 3 specializations for each of 10 states. The state Sankey now derives specializations from `category_state.csv`.
+- `trade_price_indices.csv`: every index 1.0
 
 <br>
 
@@ -553,17 +541,12 @@ year/[year]/
     │   ├── interstate-lg.csv             # Same flows at Exiobase industry detail (git-ignored)
     │   ├── interstate_factor-lg.csv      # Their factor levels (git-ignored)
     │   ├── interstate_factor-max.csv      # All 721 raw factors (use_partial_factors_interstate: false)
-    │   ├── interstate_estimate.csv       # No-satellite fallback leftovers (mutually exclusive with interstate_factor.csv)
     │   ├── category_state.csv            # BEA weights for all 50 states and DC (category_state.py)
     │   ├── trade-us.csv                  # Every industry's national purchases, US and imports (category_state.py)
     │   ├── industry_category.csv         # Each industry's state_industry_code (category_state.py)
     │   ├── export_competitiveness_state.csv  # Per-interstate_id export shares (plus -lg)
     │   ├── import_dependency_state.csv   # Per-interstate_id import shares (plus -lg)
-    │   ├── state_industry_impacts.csv    # State economic impacts (placeholder jobs)
-    │   ├── trade_price_indices.csv       # Trade price indices (currently empty)
-    │   ├── state_codes.csv               # US state reference list
-    │   ├── employment_multipliers.csv    # Per-industry employment multipliers
-    │   └── state_specializations.csv     # State industry specializations
+    │   └── state_codes.csv               # US state reference list
     ├── exports/
     │   └── export_competitiveness.csv    # Export shares by trade_id
     ├── imports/
@@ -594,9 +577,7 @@ Called during Phase 2 (BEA API Enhancement) of each tradeflow.
 
 These columns are in `interstate.csv` (not `interstate_factor.csv`, which only has `interstate_id, factor_id, level`).
 
-These columns are populated with BEA API data when available. When the API returns no data, `--use-bea-placeholder` allows the run to continue using fallback values; without it, rows dependent on BEA data are omitted.
-
-Fallback values (used only with `--use-bea-placeholder` when API is unavailable): `import_value`, `export_value`, and `trade_balance` fall back to `interstate.amount` (derived from `trade.csv amount`); `commodity_code`, `industry_code`, and `economic_multiplier` fall back to static defaults.
+These columns are populated with BEA API data when available. When the API returns no data, they get the fallback values below: `import_value`, `export_value`, and `trade_balance` are copied from `trade.csv amount`, and `commodity_code`, `industry_code`, and `economic_multiplier` get static defaults. The state split itself has no fallback: without BEA state weights, `interstate.csv` and the state tables aren't written.
 
 | Column | Tradeflow | BEA dataset | Fallback when API unavailable |
 |---|---|---|---|
@@ -631,26 +612,23 @@ python -c "from us_bea_api_client import BEAAPIClient; BEAAPIClient('dummy').cle
 
 ## 2. main_trade_analyzer.py
 
-State-level trade flow disaggregation, employment and output impact calculations, export competitiveness, and import dependency analysis. Called during Phase 3 (State-Level Analysis).
+State-level trade flow disaggregation, export competitiveness, and import dependency analysis. Called during Phase 3 (State-Level Analysis).
 
 **Uses:**
 - `year/[year]/US/domestic/trade.csv` — base domestic trade flows; must pre-exist (generated by `../trade.py`)
 - BEA domestic and state export data passed in from `main.py` after Phase 2
-- Internal state employment multipliers and specialization weights (placeholder values; intended to be replaced with live BEA regional data)
+- BEA Regional GDP-by-state weights (`category_state.py`), which allocate each flow to state pairs
 
 **Generates:**
 - `year/[year]/US/domestic/interstate_factor.csv` — state-to-state trade flows, aggregated flows (see EPA import factor reduction)
   Columns: `interstate_id` (integer FK to interstate.csv), `factor_id`, `level` (3dp for 901–903 and 910, integer for others)
 - `year/[year]/US/domestic/interstate_factor-max.csv` — same with all 721 factors; generated when `use_partial_factors_interstate: false` in `config.yaml`
-- `year/[year]/US/domestic/state_industry_impacts.csv` — employment and output impacts aggregated by destination region and industry
-  Columns: `region1 (US-CA), region2, industry_code, direct_jobs, indirect_jobs, induced_jobs, total_output_impact, tax_revenue_impact`
-- `year/[year]/US/exports/export_competitiveness.csv` — RCA, sophistication index, market share, growth rate per trade_id
-- `year/[year]/US/imports/import_dependency.csv` — import penetration ratio, supply chain vulnerability, alternative supplier count, strategic importance per trade_id
+- `year/[year]/US/exports/export_competitiveness.csv` — each trade_id's share of its industry's exports, the industry's export intensity, destination count and concentration (HHI)
+- `year/[year]/US/imports/import_dependency.csv` — each trade_id's share of its industry's imports, the industry's import intensity, supplier count and concentration (HHI)
+- `year/[year]/US/domestic/export_competitiveness_state.csv` and `import_dependency_state.csv` — the same shares per `interstate_id`
 - `year/[year]/US/domestic/state_codes.csv` — US state reference list (51 entries including DC)
-- `year/[year]/US/domestic/employment_multipliers.csv` — per-industry direct, indirect, and induced multipliers
-- `year/[year]/US/domestic/state_specializations.csv` — state industry specialization index
 
-Invoked automatically by `main.py` — domestic tradeflow triggers state disaggregation and impacts; exports triggers competitiveness analysis; imports triggers dependency analysis:
+Invoked automatically by `main.py` — domestic tradeflow triggers state disaggregation; exports triggers competitiveness analysis; imports triggers dependency analysis:
 
 
 ## 3. main_fedefl_integration.py

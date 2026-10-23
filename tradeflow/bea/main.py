@@ -13,7 +13,6 @@ Usage:
                         # continues with degraded columns -- see bea_key.py and
                         # BEA_API_KEY_MISSING_NOTICE below for exactly what's affected.
     python bea/main.py --force-regen  # Force regeneration even if files exist
-    python bea/main.py --use-bea-placeholder  # Keep domestic/interstate output even without a key
 
 Optimization: Checks for existing trade.csv files before regenerating them.
 """
@@ -52,20 +51,15 @@ BEA_API_KEY_MISSING_NOTICE = (
     "Register at https://apps.bea.gov/api/signup/ then add it to your .env\n"
     "file (see webroot/automation/paths.yaml for its location, or\n"
     "webroot/.env as a fallback), or pass --bea-key.\n\n"
-    "What still works without it: commodity_code/industry_code for domestic\n"
-    "(interstate.csv) rows -- those come from local concordance files, not\n"
-    "the BEA API -- as long as --use-bea-placeholder is also passed.\n"
-    "Without --use-bea-placeholder AND without a key, domestic processing is\n"
-    "skipped entirely (interstate.csv/interstate_factor.csv won't be\n"
-    "generated at all) -- pass --use-bea-placeholder to still get\n"
-    "commodity_code/industry_code from the concordance files.\n"
-    "What's degraded either way: economic_multiplier falls back to 1.0\n"
-    "instead of a real BEA Input-Output multiplier.\n" +
+    "Without it, the state split needs cached BEA responses: otherwise\n"
+    "interstate.csv, interstate_factor.csv, category_state.csv and\n"
+    "trade-us.csv aren't generated. economic_multiplier also falls back\n"
+    "to 1.0 instead of a real BEA Input-Output multiplier.\n" +
     "!" * 60
 )
 
 class USBEATradeFlow:
-    def __init__(self, bea_api_key=None, force_regeneration=False, use_bea_placeholder=False):
+    def __init__(self, bea_api_key=None, force_regeneration=False):
         # Load configuration
         self.config = load_config()
         
@@ -74,7 +68,6 @@ class USBEATradeFlow:
         
         # Optimization settings
         self.force_regeneration = force_regeneration
-        self.use_bea_placeholder = use_bea_placeholder
         
         # Initialize validation tracking
         self.validation_issues = []
@@ -132,8 +125,8 @@ class USBEATradeFlow:
             
         print(f"\nProcessing {len(tradeflows)} trade flows: {', '.join(tradeflows)}")
         if not self.bea_api_key:
-            print("(no BEA_API_KEY -- economic_multiplier will use its 1.0 fallback; "
-                  "pass --use-bea-placeholder to still get domestic commodity_code/industry_code)")
+            print("(no BEA_API_KEY -- the state split needs cached BEA responses, and "
+                  "economic_multiplier will use its 1.0 fallback)")
 
         for tradeflow in tradeflows:
             print(f"\n{'='*60}")
@@ -735,11 +728,10 @@ class USBEATradeFlow:
                     print(f"    Exiobase zip not found at {exiobase_zip}")
                     print("    interstate_factor.csv will be generated without factor_id")
 
-                # Use BEA Regional weights for state allocation when available.
-                bea_domestic_data = getattr(self, 'bea_domestic_data', pd.DataFrame())
+                # BEA Regional weights allocate flows to states
                 allocation_data = getattr(self, 'bea_state_allocation_data', pd.DataFrame())
-                if bea_domestic_data.empty and allocation_data.empty and not self.use_bea_placeholder:
-                    print("    ⛔ BEA state data unavailable — skipping state disaggregation.")
+                if allocation_data.empty:
+                    print("    ⛔ BEA state weights unavailable — skipping state disaggregation.")
                     print("    interstate.csv and interstate_factor.csv will not be generated.")
                     return
 
@@ -760,15 +752,11 @@ class USBEATradeFlow:
                 # Build interstate.csv the same way whether satellite factor
                 # data is available or not — amount/industry1/industry2/
                 # commodity_code shouldn't depend on whether the per-factor
-                # breakdown can be computed. Only the per-row extras split
-                # off: real per-factor rows go to interstate_factor.csv
-                # (has_satellite), leftover estimate-only fields (a placeholder
-                # coefficient/factor_id we never trust) go to
-                # interstate_estimate.csv (no satellite data available).
+                # breakdown can be computed. Per-factor rows go to
+                # interstate_factor.csv when satellite data is available.
                 unique_pairs = (
                     state_flows[['interstate_id', 'trade_id', '_origin_state', '_destination_state',
-                                 '_industry1', '_industry2', 'state_industry_code', 'level',
-                                 'employment_impact', 'flow_type']]
+                                 '_industry1', '_industry2', 'state_industry_code', 'level']]
                     .drop_duplicates(subset=['interstate_id'])
                     .reset_index(drop=True)
                 )
@@ -783,25 +771,10 @@ class USBEATradeFlow:
                     'industry2':     unique_pairs['_industry2'],
                     'state_industry_code': unique_pairs['state_industry_code'],
                     'amount':        unique_pairs['level'],
-                    'employment_impact': unique_pairs['employment_impact'],
                 })
 
                 # merge BEA domestic columns using concordance
                 interstate_df = self._merge_bea_domestic(interstate_df)
-
-                impact_input = interstate_df[[
-                    'state1',
-                    'state_industry_code',
-                    'amount',
-                    'employment_impact',
-                    'economic_multiplier'
-                ]].rename(columns={'state1': '_origin_state'}).copy()
-
-                state_impacts = self.state_analyzer.calculate_state_industry_impacts(impact_input)
-
-                interstate_estimate_df = interstate_df[['interstate_id', 'employment_impact']].merge(
-                    unique_pairs[['interstate_id', 'flow_type']], on='interstate_id'
-                )
 
                 interstate_df = interstate_df[
                     [
@@ -863,38 +836,7 @@ class USBEATradeFlow:
                     )
                     print(f"    ✅ Created interstate_factor{output_suffix}.csv ({factor_count} rows, aggregated flows)")
                 else:
-                    # No satellite data: no real per-factor breakdown is
-                    # possible, so there's no interstate_factor.csv this run —
-                    # only the interstate_estimate.csv leftovers (factor_id/
-                    # coefficient in the source data are fixed placeholders
-                    # -1/1.0, not real per-factor values, so they're excluded).
-                    interstate_estimate_df.to_csv(output_path / f'interstate_estimate{output_suffix}.csv', index=False)
-                    print(f"    ✅ Created interstate_estimate{output_suffix}.csv ({len(interstate_estimate_df)} rows)")
-                    if aggregate_to_primary and interstate_id_map is not None:
-                        # employment_impact is an absolute quantity (like amount/level),
-                        # so an ambiguous old interstate_id's value is split across its
-                        # new ones by weight, like everywhere else in this aggregation —
-                        # then summed for new ids that receive contributions from more
-                        # than one old row. flow_type is identical across a collapsed
-                        # group (state1/state2 don't change during Sector aggregation),
-                        # so 'first' is exact.
-                        id_map_rows = [
-                            (old_id, new_id, weight)
-                            for old_id, targets in interstate_id_map.items()
-                            for new_id, weight in targets
-                        ]
-                        id_map_df = pd.DataFrame(id_map_rows, columns=['interstate_id', 'new_interstate_id', 'weight'])
-                        primary_estimate = interstate_estimate_df.merge(id_map_df, on='interstate_id', how='inner')
-                        primary_estimate['employment_impact'] = primary_estimate['employment_impact'] * primary_estimate['weight']
-                        primary_estimate = primary_estimate.groupby('new_interstate_id', as_index=False).agg(
-                            employment_impact=('employment_impact', 'sum'),
-                            flow_type=('flow_type', 'first'),
-                        )
-                        primary_estimate = primary_estimate.rename(columns={'new_interstate_id': 'interstate_id'})
-                        primary_estimate.to_csv(output_path / 'interstate_estimate.csv', index=False)
-                        print(f"    ✅ Created interstate_estimate.csv ({len(primary_estimate)} rows, BEA Sector level)")
-
-                state_impacts.to_csv(output_path / 'state_industry_impacts.csv', index=False)
+                    print("    No Exiobase satellite data -- interstate_factor.csv not generated")
                 print(f"    Created US state domestic flow analysis")
             else:
                 print(f"    Base trade file not found: {trade_file}")
@@ -1092,9 +1034,6 @@ class USBEATradeFlow:
             output_path = Path(trade_file_str).parent
             output_path.mkdir(parents=True, exist_ok=True)
 
-            # Create US trade price indices table
-            self._create_trade_price_indices(output_path)
-            
             # Note: Using existing industry.csv file instead of generating bea_industry_mapping.csv Delete: https://github.com/ModelEarth/trade-data/blob/main/year/2019/US/domestic/bea_industry_mapping.csv
             
             # Create US state reference data
@@ -1107,34 +1046,6 @@ class USBEATradeFlow:
             # Restore original config
             self.config['TRADEFLOW'] = original_tradeflow
     
-    def _create_trade_price_indices(self, output_path):
-        """Create US trade price indices table"""
-
-        original_tradeflow = self.config['TRADEFLOW']
-        trade_file = Path(get_file_path(self.config, 'industryflow'))
-
-        if not trade_file.exists():
-            print("    ⚠️ trade.csv not found — skipping trade_price_indices")
-            return
-
-        trade_df = pd.read_csv(trade_file)
-        # Default values
-        import_index = 1.0
-        export_index = 1.0
-        # Create basic placeholder indices per trade_id
-        price_indices = pd.DataFrame({
-            'trade_id': trade_df['trade_id'],
-            'import_price_index': 1.0,
-            'export_price_index': 1.0,
-            'exchange_rate': 1.0,
-            'price_year': self.config['YEAR'],
-            'currency_adjustment_factor': 1.0
-        })
-
-        price_indices.to_csv(output_path / 'trade_price_indices.csv', index=False)
-
-        print(f"    ✅ Created trade_price_indices.csv ({len(price_indices)} rows)")
-
     def _generate_validation_report(self):
         """Generate comprehensive US-BEA validation report"""
         country_info = self.config['COUNTRY']
@@ -1190,9 +1101,10 @@ class USBEATradeFlow:
             f.write(f"- `export_competitiveness.csv` - Export competitiveness analysis\n")
             f.write(f"- `import_dependency.csv` - Import dependency analysis\n")
             f.write(f"- `flow.csv` - FEDEFL flow details\n")
-            f.write(f"- `industry.csv` - Industry mapping (using existing file from parent directory)\n") 
-            f.write(f"- `state_industry_impacts.csv` - State economic impacts\n")
-            f.write(f"- `trade_price_indices.csv` - Trade price indices\n\n")
+            f.write(f"- `industry.csv` - Industry mapping (using existing file from parent directory)\n")
+            f.write(f"- `category_state.csv` - BEA state weights by state_industry_code\n")
+            f.write(f"- `trade-us.csv` - National purchases by industry pair, US producers and imports\n")
+            f.write(f"- `industry_category.csv` - Each industry's state_industry_code\n\n")
         
         print(f"Generated BEA validation report: {report_path}")
 
@@ -1201,14 +1113,12 @@ def main():
     parser.add_argument('--bea-key', help='BEA API key (or use .env file)')
     parser.add_argument('--force-regen', action='store_true',
                        help='Force regeneration of trade.csv files even if they exist')
-    parser.add_argument('--use-bea-placeholder', action='store_true',
-                       help='Use hardcoded placeholder weights for state disaggregation when BEA data is unavailable')
     
     args = parser.parse_args()
     
     try:
         print("Initializing US-BEA Trade Flow Analysis...")
-        processor = USBEATradeFlow(bea_api_key=args.bea_key, force_regeneration=args.force_regen, use_bea_placeholder=args.use_bea_placeholder)
+        processor = USBEATradeFlow(bea_api_key=args.bea_key, force_regeneration=args.force_regen)
         processor.process_all_tradeflows()
         
     except Exception as e:

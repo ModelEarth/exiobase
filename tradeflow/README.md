@@ -128,7 +128,7 @@ The bea/main.py command generates the following CSV files for US domestic flows:
 - `interstate.csv` — one row per state-pair flow, BEA Sector level (`interstate_id`, `trade_id`, `state1`, `state2`, `sector1`, `sector2`, `state_industry_code`, `amount`, `commodity_code`, `industry_code`, `economic_multiplier`); `interstate-lg.csv` is the same at full Exiobase industry detail (`industry1`/`industry2`). Now always produced, satellite factor data available or not.
 - `interstate_factor.csv` — real per-factor rows (`interstate_id`, `factor_id`, `level`, `flow_type`) when satellite data is available; joins to `interstate.csv` through `interstate_id` and to `factor.csv` through `factor_id`.
 - `interstate_factor-max.csv` — same with all 721 factors (set `use_partial_factors_interstate: false` in config.yaml).
-- `interstate_estimate.csv` — produced instead of `interstate_factor.csv` when no satellite data is available: leftover fields from the disaggregation step (`interstate_id`, `employment_impact`, `flow_type`) that don't belong on `interstate` itself and aren't real per-factor data.
+- `category_state.csv`, `trade-us.csv` and `industry_category.csv` — BEA state weights for all 50 states and DC, every industry's national purchases, and each industry's `state_industry_code` (see [bea/notes.md](bea/notes.md)).
 
 ## Schema notes
 
@@ -145,9 +145,9 @@ interstate keeps trade_id as the only path back to the originating international
 
 **Dedup keys.** trade: UNIQUE(region1, region2, industry1, industry2) — the true identity of a flow, since the same physical flow can appear in two different country-perspective CSV runs under different trade_id/country/flow_type. interstate: dedups on interstate_id itself (its primary key) — a narrower UNIQUE(state1, state2, sector1, sector2) constraint was tried and dropped after finding ~50,000 of 164,064 real 2021 rows share that tuple while differing only in state_industry_code.
 
-**No bigserial id anywhere** — each table's primary key is its natural key: trade → (region1, region2, industry1, industry2); trade_factor → (trade_id, country, flow_type, factor_id); interstate → interstate_id; interstate_factor → (interstate_id, factor_id); interstate_estimate → interstate_id.
+**No bigserial id anywhere** — each table's primary key is its natural key: trade → (region1, region2, industry1, industry2); trade_factor → (trade_id, country, flow_type, factor_id); interstate → interstate_id; interstate_factor → (interstate_id, factor_id).
 
-**interstate_factor vs. interstate_estimate** are mutually exclusive per run, split by whether Exiobase satellite factor data was available: interstate_factor holds real per-factor rows (factor_id always set); interstate_estimate holds only the no-satellite fallback's real fields (employment_impact, flow_type) — no placeholder factor_id/coefficient columns. interstate.csv itself is always produced either way.
+**interstate_factor** is written only when Exiobase satellite factor data is available, and holds real per-factor rows (factor_id always set). interstate.csv itself is produced either way.
 
 **One database per year** — a Postgres database holds exactly one year (`{EXIOBASE_NAME}_{year}`), so trade, trade_factor, and interstate carry no year column; year is implicit in which database you're connected to. (interstate_id's own `{year}` prefix on the full-detail form is unrelated — just one more component of a string key, not a stored column.)
 
