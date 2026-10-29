@@ -3,7 +3,14 @@
 Current schema, pipeline, and API are documented in README.md and bea/README.md.
 This file is only for what's still open.
 
-## Open work
+## New Cornerstone Data
+
+### Add data visualizations and report on additional factors re-using the Cornerstone data-pipeline processes
+
+- The eeio-docs submodule contains the Cornerstone emiisiuons factions. 
+And Our goal is to expand the The data pipeline to include many sets of factors (water, energy, land, etc).
+
+https://docs.cornerstonedata.org/eeio/
 
 - Cornerstone has added a new Emissions Factors dataset
 
@@ -24,6 +31,8 @@ Comprehensive coverage across 148 countries, 21 regional averages plus a global 
 A sharper view of the US economy, now using annual detailed IO tables, facility-reported emissions data and country of origin models to characterize imports to the US.
 More recent data for the European Union, the UK, and China, reflecting structural changes and decarbonization progress in the world’s largest economies.
 A time series from 2017 that tracks real decarbonization, not methodology changes.
+
+## Open work
 
 Plan: Use their pipeline process to generate other factors
 
