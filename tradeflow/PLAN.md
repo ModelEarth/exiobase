@@ -5,6 +5,28 @@ This file is only for what's still open.
 
 ## Open work
 
+- Cornerstone has added a new Emissions Factors dataset
+
+https://zenodo.org/records/23396891
+
+Can we interact with this xlsx file without hosting the file?
+
+146.9 kB
+https://zenodo.org/records/23396891/files/Cornerstone_EEIO_2026-rc_Spend-based_GHG_Emission_Factors_US_Margins.xlsx
+
+Larger file (on the same Emissions Factors dataset page):
+
+34.3 MB
+https://zenodo.org/records/23396891/files/Cornerstone_EEIO_2026-rc_Spend-based_GHG_Emission_Factors.xlsx
+
+What's new in the Cornerstone EEIO:
+Comprehensive coverage across 148 countries, 21 regional averages plus a global average, and 405 sectors.
+A sharper view of the US economy, now using annual detailed IO tables, facility-reported emissions data and country of origin models to characterize imports to the US.
+More recent data for the European Union, the UK, and China, reflecting structural changes and decarbonization progress in the world’s largest economies.
+A time series from 2017 that tracks real decarbonization, not methodology changes.
+
+Plan: Use their pipeline process to generate other factors
+
 - **BEA Detail-level matching (Phase 2, not started).** EPA publishes import
   factors at BEA's Detail level (~405-411 industries). Ours use Exiobase's own
   ~200-industry grain internally, aggregated only to BEA Sector (~21
