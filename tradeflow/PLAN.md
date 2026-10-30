@@ -5,10 +5,10 @@ This file is only for what's still open.
 
 ## New Cornerstone Data
 
-### Add data visualizations and report on additional factors re-using the Cornerstone data-pipeline processes
+### Add data visualizations and report on additional factors reusing the Cornerstone data-pipeline processes
 
-- The eeio-docs submodule contains the Cornerstone emiisiuons factions. 
-And Our goal is to expand the The data pipeline to include many sets of factors (water, energy, land, etc).
+- The eeio-docs submodule contains the Cornerstone emissions factors.
+Our goal is to expand the data pipeline to include many sets of factors (water, energy, land, etc.).
 
 https://docs.cornerstonedata.org/eeio/
 
